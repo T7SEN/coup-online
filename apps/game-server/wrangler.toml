@@ -29,7 +29,7 @@ new_sqlite_classes = ["GameRoom", "MatchmakingQueue", "RoomCodeRegistry"]
 # D1 binding — uncomment after running once:
 #   pnpm --filter @coup-online/game-server exec wrangler d1 create coup-online-db
 # Then paste the returned `database_id` below.
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "coup-online-db"
-# database_id = "<replace-after-wrangler-d1-create>"
+[[d1_databases]]
+binding = "DB"
+database_name = "coup-online-db"
+database_id = "4420c671-5adb-4a9b-8c7d-24bc031946cb"
