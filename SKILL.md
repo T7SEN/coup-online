@@ -44,13 +44,13 @@ When unsure, ask one targeted question rather than guessing. Coup's edge cases (
 | Pacing | Real-time, single live session (~15 minutes typical) |
 | Lobby | Private rooms (6-char codes) + public matchmaking queue |
 | Platform | Web only — desktop + mobile browser |
-| Identity | Persistent accounts via Auth.js v5 (email magic link + Google + GitHub) |
+| Identity | Persistent accounts via Auth.js v5 (email magic link + Google + Discord) |
 | Reconnection | 30s grace, then auto-forfeit (both cards revealed, player eliminated) |
 | Communication | Free text chat in lobby only. **No chat during active game.** |
 | Eliminated players | Spectator with public info only (same view as living players) |
 | Stats | Persistent: ELO/MMR, match history, leaderboards, win rate |
 | Package manager | `pnpm` — never npm or yarn |
-| Repository | TBD (to be assigned by maintainer) |
+| Repository | https://github.com/T7SEN/coup-online |
 | Production URL | TBD (to be assigned by maintainer) |
 
 **Banned features.** Never suggest, scaffold, or reference: co-op modes, AI bot opponents, custom or "house-rule" variants, expansion characters, in-game chat (lobby-only is the spec), voice chat, card trading or gifting, real-money currencies, microtransactions/lootboxes, or any mechanic that lets a player see another player's face-down cards before reveal. Each of these breaks either the game's design integrity, the v1 scope, or both.
@@ -67,7 +67,7 @@ Pinned by `package.json` in each workspace. Do not upgrade as part of feature wo
 - **Styling:** Tailwind CSS `^4` (CSS-first via `globals.css`, no `tailwind.config.*`), `tw-animate-css`, `tailwind-merge`
 - **UI:** shadcn/ui (style: `radix-nova`, base: `zinc`, icons: `lucide`), `radix-ui`, `motion` (Framer Motion v12), `next-themes`
 - **State / forms:** native React 19 (`useActionState`, `useTransition`), Zod, no Redux/Zustand for game state
-- **Auth:** `next-auth` v5 / Auth.js (`@auth/core`, `@auth/drizzle-adapter`) — email magic link + Google + GitHub
+- **Auth:** `next-auth` v5 / Auth.js (`@auth/core`, `@auth/drizzle-adapter`) — email magic link + Google + Discord
 - **WebSocket client:** native `WebSocket` API wrapped in a typed client backed by `packages/protocol`
 - **Observability:** `@sentry/nextjs`, Vercel Analytics + Speed Insights
 
