@@ -1,0 +1,35 @@
+# Coup Online — game server (Cloudflare Worker).
+# Architecture reference: SKILL.md § 3.3, 3.4.
+
+name = "coup-online-game-server"
+main = "src/index.ts"
+compatibility_date = "2026-05-14"
+
+# Durable Object bindings.
+
+[[durable_objects.bindings]]
+name = "GAME_ROOM"
+class_name = "GameRoom"
+
+[[durable_objects.bindings]]
+name = "MATCHMAKING_QUEUE"
+class_name = "MatchmakingQueue"
+
+[[durable_objects.bindings]]
+name = "ROOM_CODE_REGISTRY"
+class_name = "RoomCodeRegistry"
+
+# DO migrations.
+# per SKILL.md § 3.3 — SQLite-backed only. `new_classes` would create key-value DOs
+# (paid-plan only) and break the free-tier budget. Never change this to `new_classes`.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoom", "MatchmakingQueue", "RoomCodeRegistry"]
+
+# D1 binding — uncomment after running once:
+#   pnpm --filter @coup-online/game-server exec wrangler d1 create coup-online-db
+# Then paste the returned `database_id` below.
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "coup-online-db"
+# database_id = "<replace-after-wrangler-d1-create>"
