@@ -277,6 +277,44 @@ Both files are gitignored (per root `.gitignore`).
 
 ---
 
+## Observability — Sentry + Cloudflare Web Analytics
+
+SKILL.md § 5 — error monitoring on both runtimes. SKILL.md § 2 — Cloudflare
+Web Analytics (never Vercel Analytics).
+
+### Sentry
+
+| Runtime | Package | Wiring |
+|---|---|---|
+| Worker | `@sentry/cloudflare` | `Sentry.withSentry()` wraps the default export; `Sentry.instrumentDurableObjectWithSentry()` wraps each of the 3 DO classes (`apps/game-server/src/index.ts`). The `captureError` helper in `do-game-room.ts` reports DO errors tagged with `matchId`. |
+| Web | `@sentry/nextjs` | `instrumentation.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`, `instrumentation-client.ts`, `app/global-error.tsx`; `next.config.ts` wrapped in `withSentryConfig`. |
+
+Scope decisions:
+- **Errors only** — no Session Replay, no User Feedback widget, no Sentry
+  Logs product. Keeps the bundle lean and the free-tier quota (5K errors/mo)
+  for actual errors.
+- **`sendDefaultPii: false`** — user IPs are not shipped to Sentry
+  (SKILL.md § 3.6 — minimal PII).
+- **`tracesSampleRate`** — 1.0 in dev, 0.1 in prod.
+
+DSNs are optional: when unset the SDK initializes disabled and every capture
+no-ops, so local dev and un-configured deploys run clean.
+
+Source-map upload (un-minified stack traces) is optional — set `SENTRY_ORG`,
+`SENTRY_PROJECT`, and `SENTRY_AUTH_TOKEN` in Vercel env to enable it. Without
+them `withSentryConfig` skips upload; runtime error capture still works.
+`@sentry/cli` (pulled in for source-map upload) has a postinstall that
+downloads a binary — allowlisted in `pnpm-workspace.yaml`'s `allowBuilds`.
+
+### Cloudflare Web Analytics
+
+A beacon `<Script>` in `apps/web/app/layout.tsx`, rendered only when
+`NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN` is set. Get the token from the
+Cloudflare dashboard → Web Analytics → add a site (use the non-Cloudflare
+flow since Vercel hosts the frontend). Free, no event cap, no npm package.
+
+---
+
 ## Free-tier limits — what to watch
 
 | Resource | Free limit | What overruns look like |

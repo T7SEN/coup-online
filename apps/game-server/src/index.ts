@@ -1,6 +1,10 @@
+import * as Sentry from '@sentry/cloudflare'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { createAuth } from './auth'
+import { GameRoom as GameRoomClass } from './do-game-room'
+import { MatchmakingQueue as MatchmakingQueueClass } from './do-matchmaking'
+import { RoomCodeRegistry as RoomCodeRegistryClass } from './do-room-codes'
 import { isOriginAllowed } from './origin'
 import { signWsToken } from './ws-token'
 
@@ -79,10 +83,36 @@ app.get('/api/ws', async (c) => {
   return stub.fetch(c.req.raw)
 })
 
-export default app
+// SKILL.md § 5 — Sentry on the Worker. The factory reads the DSN per-request
+// from env; when SENTRY_DSN_WORKER is unset (typical local dev) the SDK
+// initializes disabled and every capture no-ops. tracesSampleRate is kept low
+// to stay inside the free-tier span quota; sendDefaultPii is false so user IPs
+// are never shipped to Sentry (SKILL.md § 3.6 — minimal PII).
+function sentryOptions(env: Env) {
+  return {
+    dsn: env.SENTRY_DSN_WORKER,
+    tracesSampleRate: 0.1,
+    sendDefaultPii: false,
+  }
+}
 
-// Workers convention: re-export DO classes at the entry module so the runtime can
-// instantiate them by class name as declared in wrangler.toml's [[durable_objects.bindings]].
-export { GameRoom } from './do-game-room'
-export { MatchmakingQueue } from './do-matchmaking'
-export { RoomCodeRegistry } from './do-room-codes'
+// The Hono app is the fetch handler; withSentry wraps it so unhandled errors
+// in HTTP routes are captured.
+export default Sentry.withSentry(sentryOptions, app)
+
+// Workers convention: re-export DO classes at the entry module so the runtime
+// can instantiate them by class name as declared in wrangler.toml's
+// [[durable_objects.bindings]]. Each is wrapped with Sentry DO instrumentation
+// — the export name must still match the wrangler `class_name`.
+export const GameRoom = Sentry.instrumentDurableObjectWithSentry(
+  sentryOptions,
+  GameRoomClass,
+)
+export const MatchmakingQueue = Sentry.instrumentDurableObjectWithSentry(
+  sentryOptions,
+  MatchmakingQueueClass,
+)
+export const RoomCodeRegistry = Sentry.instrumentDurableObjectWithSentry(
+  sentryOptions,
+  RoomCodeRegistryClass,
+)

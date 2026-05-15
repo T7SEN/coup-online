@@ -54,7 +54,7 @@ When unsure, ask one targeted question rather than guessing. Coup's edge cases (
 | Package manager | `pnpm` — never npm or yarn |
 | Repository | `github.com/T7SEN/coup-online` |
 | Cost posture | **Free tier only.** v1 ships on free Vercel Hobby + free Cloudflare Workers/D1/Web Analytics + free Sentry tier + free Resend tier. No paid services allowed without explicit approval. |
-| Production URL | Not yet deployed — assigned on first `wrangler deploy` + Vercel project creation. See [`references/deployment.md`](./references/deployment.md). |
+| Production URL | Frontend: `https://coups.app` (Vercel). Game server: `https://coup-online-game-server.a-hitelare2.workers.dev` (Cloudflare Workers). See [`references/deployment.md`](./references/deployment.md). |
 
 **Banned features.** Never suggest, scaffold, or reference: co-op modes, AI bot opponents, custom or "house-rule" variants, expansion characters, in-game chat (lobby-only is the spec), voice chat, card trading or gifting, real-money currencies, microtransactions/lootboxes, any mechanic that lets a player see another player's face-down cards before reveal, GitHub OAuth (not in v1 provider list), or paid-tier services without explicit approval. Each of these breaks either the game's design integrity, the v1 scope, or the free-tier budget.
 

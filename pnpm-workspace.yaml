@@ -7,3 +7,7 @@ allowBuilds:
   workerd: true
   sharp: false
   unrs-resolver: false
+  # @sentry/cli postinstall downloads the source-map upload binary used by
+  # withSentryConfig at build time. Legitimate; needed once a Sentry auth
+  # token is configured. See references/deployment.md.
+  '@sentry/cli': true

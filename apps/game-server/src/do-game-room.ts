@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import * as Sentry from '@sentry/cloudflare'
 import { ClientMessage, type Phase, type ServerMessage } from '@coup-online/protocol'
 import {
   applyAssassinate,
@@ -188,7 +189,7 @@ export class GameRoom extends DurableObject<Env> {
       if (err instanceof IllegalActionError) {
         this.sendTo(ws, { type: 'error', code: err.code, message: err.message })
       } else {
-        console.error('GameRoom unexpected error:', err)
+        this.captureError(err)
         this.sendTo(ws, {
           type: 'error',
           code: 'internal_error',
@@ -235,7 +236,7 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
-    console.error('GameRoom websocket error:', error)
+    this.captureError(error)
     await this.webSocketClose(ws)
   }
 
@@ -584,7 +585,7 @@ export class GameRoom extends DurableObject<Env> {
           state.endedAt,
         )
       } catch (err) {
-        console.error('persistMatchResult failed:', err)
+        this.captureError(err)
       }
     }
   }
@@ -693,6 +694,15 @@ export class GameRoom extends DurableObject<Env> {
     const tags = this.ctx.getTags(ws)
     const tag = tags.find((t) => t.startsWith('userId:'))
     return tag ? tag.slice('userId:'.length) : null
+  }
+
+  // SKILL.md § 5 — route unexpected errors to Sentry, tagged with matchId so
+  // events are filterable per game. ctx.id.name is the matchId (GameRoom DOs
+  // are keyed via idFromName(matchId)). No-ops when SENTRY_DSN_WORKER is unset.
+  private captureError(err: unknown): void {
+    Sentry.captureException(err, {
+      tags: { matchId: this.ctx.id.name ?? 'unknown' },
+    })
   }
 
   private sendTo(ws: WebSocket, msg: ServerMessage): void {

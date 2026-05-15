@@ -17,6 +17,10 @@ declare global {
       // Unset in dev → permissive localhost + RFC 1918 matching.
       // Set in production (`wrangler secret put ALLOWED_ORIGINS`).
       ALLOWED_ORIGINS?: string
+      // Sentry DSN for the Worker (SKILL.md § 5). Optional — when unset
+      // (typical local dev) the Sentry SDK initializes in a disabled state
+      // and every capture call no-ops.
+      SENTRY_DSN_WORKER?: string
     }
   }
 }
