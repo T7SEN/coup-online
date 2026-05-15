@@ -256,6 +256,19 @@ fields are NOT cached** (per the skill); they're fetched fresh on every
 read. We don't add custom fields today, but if we add (e.g.) "current
 match" to the session in the future, plan for the DB hit.
 
+### Account linking
+
+`account.accountLinking.enabled = true` with `trustedProviders: ['google',
+'discord']`. Same email across providers → one `user` row, multiple
+`account` rows (one per provider). This is the intended behavior — a player
+should have a single identity, MMR row, and match history regardless of
+which provider they used most recently.
+
+Both Google and Discord return verified email addresses, which is why
+they're in `trustedProviders` (an unverified email could be used to hijack
+an existing user). Magic-link signups inherently verify via the click flow
+and are linked the same way.
+
 ### Magic-link expiry
 
 Better Auth's magicLink plugin defaults to a short token expiry (minutes,

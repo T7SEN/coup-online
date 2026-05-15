@@ -53,6 +53,18 @@ export function createAuth(env: Env) {
         maxAge: 60,
       },
     },
+    // Account linking — one identity per person. When a user signs in with
+    // Google AND Discord using the same email, Better Auth links the new
+    // OAuth account to the existing user row instead of refusing on the
+    // email UNIQUE constraint. `trustedProviders` lists providers whose
+    // email-verified claim we trust (Google and Discord both verify;
+    // anything else would need explicit confirmation to link).
+    account: {
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ['google', 'discord'],
+      },
+    },
     socialProviders: {
       google: {
         clientId: env.GOOGLE_CLIENT_ID,
@@ -61,6 +73,28 @@ export function createAuth(env: Env) {
       discord: {
         clientId: env.DISCORD_CLIENT_ID,
         clientSecret: env.DISCORD_CLIENT_SECRET,
+      },
+    },
+    // Ensure `user.name` is never empty. Better Auth's OAuth providers map
+     // `profile.name` → `user.name` automatically, but the magic-link plugin
+     // has no provider name to copy from, so without this hook the column
+     // gets an empty string. Falling back to the email's local part gives a
+     // sensible default; users can change `displayName` later (separate
+     // column reserved for an onboarding flow).
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (user) => {
+            const provided =
+              typeof user.name === 'string' ? user.name.trim() : ''
+            if (provided.length > 0) {
+              return { data: { ...user, name: provided } }
+            }
+            const fallback =
+              user.email?.split('@')[0]?.trim().slice(0, 40) || 'Player'
+            return { data: { ...user, name: fallback } }
+          },
+        },
       },
     },
     plugins: [

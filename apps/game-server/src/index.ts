@@ -43,8 +43,13 @@ app.post('/api/ws-token', async (c) => {
   if (!session?.user?.id) {
     return c.json({ error: 'unauthorized' }, 401)
   }
+  // `||` (not `??`) — Better Auth may persist `name` as an empty string for
+  // magic-link signups. Empty-string would propagate into the JWT and show as
+  // a blank seat name in-game. trim() catches whitespace-only.
   const displayName =
-    session.user.name ?? session.user.email?.split('@')[0] ?? 'Player'
+    session.user.name?.trim() ||
+    session.user.email?.split('@')[0]?.trim() ||
+    'Player'
   const token = await signWsToken(c.env.WS_SIGNING_SECRET, {
     userId: session.user.id,
     displayName,

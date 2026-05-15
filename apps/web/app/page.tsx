@@ -100,8 +100,13 @@ export default function Lobby() {
     )
   }
 
+  // `||` (not `??`) so empty-string `name` (common for magic-link signups
+  // where the provider doesn't carry a display name) falls through to the
+  // email prefix instead of rendering blank. trim() catches whitespace-only.
   const displayName =
-    session.user.name ?? session.user.email?.split('@')[0] ?? 'Player'
+    session.user.name?.trim() ||
+    session.user.email?.split('@')[0]?.trim() ||
+    'Player'
   const canJoin = !busy && parseMatchCode(matchCode).length > 0
   // Lint: authClient is imported for type-flow but only used indirectly
   // through useSession + signOut. Reference it once so the import isn't
