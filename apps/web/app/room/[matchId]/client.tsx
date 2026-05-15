@@ -10,6 +10,7 @@ import type {
   ServerMessage,
 } from '@coup-online/protocol'
 import { GAME_SERVER_WS } from '@/lib/config'
+import { logger } from '@/lib/logger'
 import { useIsClient } from '@/lib/use-is-client'
 import { WsClient, type ConnectionState } from '@/lib/ws-client'
 
@@ -112,7 +113,9 @@ export function RoomClient({
             }, 4_000)
             break
           case 'rate-limit':
-            console.warn('rate-limit', msg.retryAfterMs)
+            logger.warn('rate limited by server', {
+              retryAfterMs: msg.retryAfterMs,
+            })
             break
           case 'prompt':
             // SKILL.md § 3.2 phase 7 — private 4-card pool addressed only to
@@ -124,7 +127,8 @@ export function RoomClient({
             }
             break
           case 'chat':
-            console.log('chat', msg.fromPlayerId, msg.text)
+            // Lobby chat isn't rendered yet — debug-log receipt for now.
+            logger.debug('lobby chat received', { fromPlayerId: msg.fromPlayerId })
             break
         }
       },
@@ -146,9 +150,9 @@ export function RoomClient({
         setError(labelByCode[code] ?? `Connection closed (code ${code})`)
       },
       onError() {
-        // Most errors are followed by a close event — defer error UX to onClose
-        // so we don't double-show. The console retains the raw event.
-        console.warn('WsClient error event')
+        // Most errors are followed by a close event — defer error UX to
+        // onClose so we don't double-show. Just record that it happened.
+        logger.warn('websocket error event')
       },
     })
     wsRef.current = ws

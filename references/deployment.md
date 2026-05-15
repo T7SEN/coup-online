@@ -289,16 +289,30 @@ Web Analytics (never Vercel Analytics).
 | Worker | `@sentry/cloudflare` | `Sentry.withSentry()` wraps the default export; `Sentry.instrumentDurableObjectWithSentry()` wraps each of the 3 DO classes (`apps/game-server/src/index.ts`). The `captureError` helper in `do-game-room.ts` reports DO errors tagged with `matchId`. |
 | Web | `@sentry/nextjs` | `instrumentation.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`, `instrumentation-client.ts`, `app/global-error.tsx`; `next.config.ts` wrapped in `withSentryConfig`. |
 
-Scope decisions:
-- **Errors only** — no Session Replay, no User Feedback widget, no Sentry
-  Logs product. Keeps the bundle lean and the free-tier quota (5K errors/mo)
-  for actual errors.
+Enabled features:
+- **Error monitoring** — always on, both runtimes.
+- **Performance Monitoring (tracing)** — `tracesSampleRate` 1.0 dev / 0.1
+  prod, both runtimes.
+- **Structured Logs** — `enableLogs: true` on web (client/server/edge) and
+  the Worker. Application code logs through the `logger` utility
+  (`apps/web/lib/logger.ts`, `apps/game-server/src/logger.ts`), which calls
+  `Sentry.logger.*` and — for `logger.error(msg, err)` — also opens an Issue.
+  SKILL.md § 5 forbids raw `console.*` at call sites; the logger module is
+  the one sanctioned place for it.
+- **Metrics** — on by default in SDK ≥ 10.25 (project is on 10.53). No init
+  flag exists; only `enableMetrics: false` would disable. No `Sentry.metrics.*`
+  instrumentation calls yet — added when there's a metric worth tracking.
+- **Session Replay** — web only (browser-only by nature). `replayIntegration()`
+  with all text / inputs / media masked (SKILL.md § 3.6). Error-biased
+  sampling: `replaysOnErrorSampleRate: 1.0`, `replaysSessionSampleRate: 0.01`
+  — the free-tier replay quota is small, so spend it on sessions that broke.
+- **User Feedback** — web only. `feedbackIntegration()` floating widget.
+
+Other config:
 - **`sendDefaultPii: false`** — user IPs are not shipped to Sentry
   (SKILL.md § 3.6 — minimal PII).
-- **`tracesSampleRate`** — 1.0 in dev, 0.1 in prod.
-
-DSNs are optional: when unset the SDK initializes disabled and every capture
-no-ops, so local dev and un-configured deploys run clean.
+- DSNs are optional: when unset the SDK initializes disabled and every
+  capture no-ops, so local dev and un-configured deploys run clean.
 
 Source-map upload (un-minified stack traces) is optional — set `SENTRY_ORG`,
 `SENTRY_PROJECT`, and `SENTRY_AUTH_TOKEN` in Vercel env to enable it. Without

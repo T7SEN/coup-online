@@ -5,6 +5,7 @@ import { createAuth } from './auth'
 import { GameRoom as GameRoomClass } from './do-game-room'
 import { MatchmakingQueue as MatchmakingQueueClass } from './do-matchmaking'
 import { RoomCodeRegistry as RoomCodeRegistryClass } from './do-room-codes'
+import { logger } from './logger'
 import { isOriginAllowed } from './origin'
 import { signWsToken } from './ws-token'
 
@@ -27,6 +28,16 @@ app.use(
     credentials: true,
   }),
 )
+
+// SKILL.md § 5 — funnel Hono route-handler errors into Sentry. Hono catches
+// uncaught errors from route handlers internally and would otherwise just
+// return a 500 that withSentry never observes; this hook reports them
+// explicitly via the logger. It runs inside the withSentry request scope, so
+// the capture routes to SENTRY_DSN_WORKER.
+app.onError((err, c) => {
+  logger.error('hono route handler error', err)
+  return c.json({ error: 'internal_error' }, 500)
+})
 
 app.get('/health', (c) => c.json({ ok: true }))
 
@@ -93,6 +104,10 @@ function sentryOptions(env: Env) {
     dsn: env.SENTRY_DSN_WORKER,
     tracesSampleRate: 0.1,
     sendDefaultPii: false,
+    // Sentry Logs product. Metrics need no flag — on by default in SDK
+    // ≥ 10.25; `Sentry.metrics.*` calls wired when there's a metric to send.
+    // Session Replay / User Feedback are browser-only — N/A on the Worker.
+    enableLogs: true,
   }
 }
 

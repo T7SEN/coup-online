@@ -1,5 +1,4 @@
 import { DurableObject } from 'cloudflare:workers'
-import * as Sentry from '@sentry/cloudflare'
 import { ClientMessage, type Phase, type ServerMessage } from '@coup-online/protocol'
 import {
   applyAssassinate,
@@ -26,6 +25,7 @@ import {
 } from '@coup-online/game-logic'
 import { verifyJwt } from './auth'
 import { persistMatchResult } from './db-helpers'
+import { logger } from './logger'
 import { isOriginAllowed } from './origin'
 import { checkAndUpdateRate } from './rate-limit'
 
@@ -189,7 +189,7 @@ export class GameRoom extends DurableObject<Env> {
       if (err instanceof IllegalActionError) {
         this.sendTo(ws, { type: 'error', code: err.code, message: err.message })
       } else {
-        this.captureError(err)
+        logger.error('ws message handler failed', err, { matchId: this.matchId })
         this.sendTo(ws, {
           type: 'error',
           code: 'internal_error',
@@ -236,7 +236,7 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
-    this.captureError(error)
+    logger.error('websocket transport error', error, { matchId: this.matchId })
     await this.webSocketClose(ws)
   }
 
@@ -585,7 +585,7 @@ export class GameRoom extends DurableObject<Env> {
           state.endedAt,
         )
       } catch (err) {
-        this.captureError(err)
+        logger.error('persistMatchResult failed', err, { matchId: this.matchId })
       }
     }
   }
@@ -624,7 +624,9 @@ export class GameRoom extends DurableObject<Env> {
     if (!state.game) return
     const winner = state.game.seats.find((s) => s.isAlive)
     if (!winner) {
-      console.error('broadcastGameEnd: no alive seat at GAME_OVER')
+      logger.error('broadcastGameEnd: no alive seat at GAME_OVER', undefined, {
+        matchId: this.matchId,
+      })
       return
     }
     for (const ws of this.ctx.getWebSockets()) {
@@ -667,9 +669,10 @@ export class GameRoom extends DurableObject<Env> {
 
   private sendExchangePrompt(pool: NonNullable<GameState['exchangePool']>): void {
     if (pool.cards.length !== 4) {
-      console.error(
-        `sendExchangePrompt: pool must have 4 cards (got ${pool.cards.length})`,
-      )
+      logger.error('sendExchangePrompt: pool must have 4 cards', undefined, {
+        matchId: this.matchId,
+        poolSize: pool.cards.length,
+      })
       return
     }
     const msg: ServerMessage = {
@@ -696,20 +699,20 @@ export class GameRoom extends DurableObject<Env> {
     return tag ? tag.slice('userId:'.length) : null
   }
 
-  // SKILL.md § 5 — route unexpected errors to Sentry, tagged with matchId so
-  // events are filterable per game. ctx.id.name is the matchId (GameRoom DOs
-  // are keyed via idFromName(matchId)). No-ops when SENTRY_DSN_WORKER is unset.
-  private captureError(err: unknown): void {
-    Sentry.captureException(err, {
-      tags: { matchId: this.ctx.id.name ?? 'unknown' },
-    })
+  // GameRoom DOs are keyed via idFromName(matchId), so ctx.id.name IS the
+  // matchId. Passed as a logger attribute so every event (Sentry Log + Issue)
+  // is filterable per game (SKILL.md § 5).
+  private get matchId(): string {
+    return this.ctx.id.name ?? 'unknown'
   }
 
   private sendTo(ws: WebSocket, msg: ServerMessage): void {
     try {
       ws.send(JSON.stringify(msg))
-    } catch (err) {
-      console.error('GameRoom send failed:', err)
+    } catch {
+      // Send failures are routine — the socket closed between getWebSockets()
+      // and send(). Warn-level, no Issue (would spam Sentry).
+      logger.warn('ws send failed', { matchId: this.matchId })
     }
   }
 }

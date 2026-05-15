@@ -1,4 +1,5 @@
 import { ClientMessage, ServerMessage } from '@coup-online/protocol'
+import { logger } from './logger'
 
 // Typed WebSocket wrapper. SKILL.md § 5 — Zod-validate every WS message at the
 // boundary, both directions. This is the boundary on the client side.
@@ -60,12 +61,12 @@ export class WsClient {
   send(msg: ClientMessage): void {
     if (this.disposed) return
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn('WsClient: send called while socket is not OPEN')
+      logger.warn('ws-client: send while socket not open')
       return
     }
     const result = ClientMessage.safeParse(msg)
     if (!result.success) {
-      console.error('WsClient: invalid outbound message', result.error)
+      logger.error('ws-client: invalid outbound message', result.error)
       return
     }
     this.ws.send(JSON.stringify(result.data))
@@ -119,12 +120,12 @@ export class WsClient {
       try {
         parsed = JSON.parse(typeof e.data === 'string' ? e.data : '')
       } catch {
-        console.error('WsClient: failed to parse server message')
+        logger.error('ws-client: failed to parse server message')
         return
       }
       const result = ServerMessage.safeParse(parsed)
       if (!result.success) {
-        console.error('WsClient: invalid server message', result.error)
+        logger.error('ws-client: invalid server message', result.error)
         return
       }
       this.opts.onMessage(result.data)
