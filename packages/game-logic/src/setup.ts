@@ -53,5 +53,7 @@ export function dealInitialState(matchId: MatchId, players: readonly SeatInput[]
     pendingAction: null,
     pendingBlock: null,
     timerEndsAt: null,
+    influenceLossQueue: [],
+    exchangePool: null,
   }
 }

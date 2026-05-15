@@ -50,4 +50,18 @@ export interface GameState {
   pendingBlock: PendingBlock | null
   // Unix ms; null when no timer is running for the current phase.
   timerEndsAt: number | null
+  // FIFO queue of players who must respond to INFLUENCE_LOSS prompts. The head
+  // is the current picker; after their pick resolves, the head is removed and
+  // the next player (if any) becomes the picker. A queue rather than a single
+  // field because Assassinate's disproven-block path enqueues TWO losses for
+  // the same player (one from failed block challenge, one from the Assassinate
+  // resolving). Cleared by concludeTurn(). Internal to game-logic; not exposed
+  // in PlayerView yet — surface through the protocol when client UI needs it.
+  influenceLossQueue: PlayerId[]
+  // The Ambassador exchange pool: the actor's face-down cards plus the 2 newly
+  // drawn from the Court Deck. Non-null only when phase === 'EXCHANGE_SELECTION'.
+  // SKILL.md § 3.2 phase 7 — strictly private to the actor; the DO sends the
+  // contents via a `prompt` message and never to other players. Cleared on
+  // exchange-pick resolution (and by concludeTurn defensively).
+  exchangePool: { readonly actorPlayerId: PlayerId; cards: CardKind[] } | null
 }
