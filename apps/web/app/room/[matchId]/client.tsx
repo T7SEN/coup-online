@@ -10,7 +10,6 @@ import type {
   ServerMessage,
 } from '@coup-online/protocol'
 import { GAME_SERVER_WS } from '@/lib/config'
-import { getOrCreateUserId } from '@/lib/identity'
 import { useIsClient } from '@/lib/use-is-client'
 import { WsClient, type ConnectionState } from '@/lib/ws-client'
 
@@ -38,7 +37,16 @@ interface OverState {
 }
 type UiState = LobbyState | GameStateUi | OverState | null
 
-export function RoomClient({ matchId }: { matchId: string }) {
+export function RoomClient({
+  matchId,
+  myPlayerId,
+}: {
+  matchId: string
+  // Pulled from the Better Auth session on the server side (room/page.tsx) and
+  // passed in. Used only for client-side UI checks (am I the host? show kick
+  // buttons?). The WS handshake is gated by the JWT, not this value.
+  myPlayerId: string
+}) {
   // useIsClient = false during SSR + first client render (matching SSR HTML),
   // then true after hydration. This prevents the SSR/CSR mismatch that arises
   // from sessionStorage being null on the server but populated on the client.
@@ -48,10 +56,6 @@ export function RoomClient({ matchId }: { matchId: string }) {
     isClient && typeof window !== 'undefined'
       ? window.sessionStorage.getItem(`coup-online:token:${matchId}`)
       : null
-  // userId is read post-hydration so the placeholder render doesn't touch
-  // localStorage during SSR. The room API gates everything by JWT — this is
-  // just for client-side UI checks (am I the host? show kick buttons?).
-  const myPlayerId = isClient ? getOrCreateUserId() : ''
   const [state, setState] = useState<UiState>(null)
   // Fatal errors (non-recoverable connection close, missing token, etc.).
   // These replace the page with a "Back to lobby" affordance.

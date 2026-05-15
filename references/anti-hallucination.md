@@ -65,9 +65,10 @@ D1 is SQLite. Most Postgres features don't exist; some have rough equivalents.
 runtime. Trying to use the D1 REST API from Next.js bypasses our authorization
 boundary and adds a second billing surface.
 
-**Use:** Worker owns D1 exclusively. Next.js calls Worker HTTP endpoints. Auth.js's
-adapter operations (user upsert, verification-token CRUD for magic links) are
-proxied via the Worker.
+**Use:** Worker owns D1 exclusively. Better Auth runs on the Worker too, with
+the Drizzle adapter pointed straight at the D1 binding. Next.js proxies
+`/api/auth/*` to the Worker via `next.config.ts` `rewrites()` — cookies stay
+on the Vercel origin while the database surface lives entirely on Cloudflare.
 
 ### ❌ `mongoose`, MongoDB
 
@@ -79,22 +80,28 @@ Different paradigm; not in the stack.
 
 ## Auth
 
-### ❌ `next-auth` v4 patterns — `[...nextauth].ts` under `pages/api`, `getServerSession`, `NextAuthOptions`
+### ❌ `next-auth` / Auth.js at any version — `[...nextauth].ts`, `@auth/core`, `@auth/drizzle-adapter`, `getServerSession`, `NextAuthOptions`, `useSession from "next-auth/react"`
 
-Auth.js v5 (the renamed/rewritten next-auth) restructured the API. v4 patterns
-won't compile against v5. The package is now `@auth/core` + per-framework
-adapters (`@auth/nextjs`, `@auth/drizzle-adapter`).
+Auth.js (formerly next-auth) was previously used in this project and has been
+removed. The project is on **Better Auth** (`better-auth`) running on the
+Worker. Any Auth.js import, helper, or schema convention is wrong for this
+codebase — the column names, session model, route handler, and adapter
+contract all differ.
 
-**Use:** Auth.js v5 conventions:
-- Config in `app/auth.ts` (or `lib/auth.ts`)
-- Route handler at `app/api/auth/[...nextauth]/route.ts`
-- Server-side session via the `auth()` helper (no `getServerSession`)
-- Adapter operations proxied to the Worker (per the Worker-owned D1 rule)
+**Use:** Better Auth conventions:
+- Factory in `apps/game-server/src/auth.ts` — `betterAuth({ database: drizzleAdapter(db, { provider: 'sqlite', schema: { user, session, account, verification } }) })`
+- Router mount in `apps/game-server/src/index.ts` — `app.on(['GET','POST'], '/api/auth/*', (c) => createAuth(c.env).handler(c.req.raw))`
+- Browser client at `apps/web/lib/auth-client.ts` — `createAuthClient({ plugins: [magicLinkClient()] })` from `better-auth/react`
+- Server-side session via `apps/web/lib/get-server-session.ts` (forwards cookie header)
+- Next.js never has a D1 binding; `next.config.ts` `rewrites()` proxies `/api/auth/*` and `/api/ws-token` to the Worker
+- Skills: `better-auth-best-practices`, `better-auth-security-best-practices`, `email-and-password-best-practices`
+- Reference: [`auth.md`](./auth.md)
 
-### ❌ GitHub OAuth provider in Auth.js config
+### ❌ GitHub OAuth provider
 
-v1 providers are locked: Google + Discord + email magic link. Adding GitHub
-requires explicit spec amendment in SKILL.md § 1.
+v1 providers are locked: Google + Discord + email magic link (via
+`better-auth/plugins/magic-link` + Resend). Adding GitHub requires explicit
+spec amendment in SKILL.md § 1.
 
 ---
 
@@ -316,9 +323,11 @@ respect the workspace protocol the same way.
 Vulnerable to XSS exfiltration.
 
 **Use:**
-- Next.js session: HTTP-only cookie (Auth.js handles this).
+- Next.js session: HTTP-only cookie set by Better Auth (issued by the Worker;
+  the browser sees it on the Vercel origin via `next.config.ts` rewrites).
 - WebSocket auth: short-lived JWT in the upgrade query string, in memory only,
-  re-fetched as needed from `app/api/ws-token/route.ts`.
+  fetched from the Worker's `POST /api/ws-token` (which Next.js rewrites
+  transparently proxy from the browser).
 
 ---
 

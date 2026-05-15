@@ -6,7 +6,7 @@ import {
   matchPlayers,
   matches,
   mmrHistory,
-  users,
+  user,
   type NewMatch,
   type NewMatchPlayer,
   type NewMmrHistory,
@@ -14,7 +14,7 @@ import {
 
 // All queries take the Drizzle D1 database handle as their first argument so
 // the Worker can manage instance lifecycle. Construct via createDb(env.DB)
-// in `apps/game-server/src/db.ts`.
+// in `apps/game-server/src/`.
 
 export type Db = DrizzleD1Database<Record<string, never>>
 
@@ -23,12 +23,12 @@ export type Db = DrizzleD1Database<Record<string, never>>
 // ----------------------------------------------------------------------------
 
 export async function getUserById(db: Db, id: string) {
-  const rows = await db.select().from(users).where(eq(users.id, id)).limit(1)
+  const rows = await db.select().from(user).where(eq(user.id, id)).limit(1)
   return rows[0] ?? null
 }
 
 export async function getUserByEmail(db: Db, email: string) {
-  const rows = await db.select().from(users).where(eq(users.email, email)).limit(1)
+  const rows = await db.select().from(user).where(eq(user.email, email)).limit(1)
   return rows[0] ?? null
 }
 
@@ -80,15 +80,15 @@ export async function getUserMatchHistory(
 export async function getLeaderboardTop100(db: Db) {
   return db
     .select({
-      id: users.id,
-      displayName: users.displayName,
-      name: users.name,
-      image: users.image,
-      mu: users.mu,
-      sigma: users.sigma,
-      rating: sql<number>`(${users.mu} - 3 * ${users.sigma})`.as('rating'),
+      id: user.id,
+      displayName: user.displayName,
+      name: user.name,
+      image: user.image,
+      mu: user.mu,
+      sigma: user.sigma,
+      rating: sql<number>`(${user.mu} - 3 * ${user.sigma})`.as('rating'),
     })
-    .from(users)
+    .from(user)
     .orderBy(sql`rating DESC`)
     .limit(100)
 }
@@ -115,12 +115,12 @@ export async function getFriendsList(db: Db, userId: string) {
     .select({
       friendUserId: friends.friendUserId,
       createdAt: friends.createdAt,
-      displayName: users.displayName,
-      name: users.name,
-      image: users.image,
+      displayName: user.displayName,
+      name: user.name,
+      image: user.image,
     })
     .from(friends)
-    .innerJoin(users, eq(users.id, friends.friendUserId))
+    .innerJoin(user, eq(user.id, friends.friendUserId))
     .where(eq(friends.userId, userId))
 }
 
@@ -129,12 +129,12 @@ export async function getIncomingFriendRequests(db: Db, userId: string) {
     .select({
       fromUserId: friendRequests.fromUserId,
       createdAt: friendRequests.createdAt,
-      displayName: users.displayName,
-      name: users.name,
-      image: users.image,
+      displayName: user.displayName,
+      name: user.name,
+      image: user.image,
     })
     .from(friendRequests)
-    .innerJoin(users, eq(users.id, friendRequests.fromUserId))
+    .innerJoin(user, eq(user.id, friendRequests.fromUserId))
     .where(eq(friendRequests.toUserId, userId))
 }
 
@@ -143,12 +143,12 @@ export async function getOutgoingFriendRequests(db: Db, userId: string) {
     .select({
       toUserId: friendRequests.toUserId,
       createdAt: friendRequests.createdAt,
-      displayName: users.displayName,
-      name: users.name,
-      image: users.image,
+      displayName: user.displayName,
+      name: user.name,
+      image: user.image,
     })
     .from(friendRequests)
-    .innerJoin(users, eq(users.id, friendRequests.toUserId))
+    .innerJoin(user, eq(user.id, friendRequests.toUserId))
     .where(eq(friendRequests.fromUserId, userId))
 }
 
@@ -158,7 +158,7 @@ export async function getOutgoingFriendRequests(db: Db, userId: string) {
 
 // Inputs aggregated from packages/rating's RatingDelta + game-logic's final state.
 // One call writes: matches row, N match_player rows, N mmr_history rows,
-// and updates users.mu / users.sigma for each player.
+// and updates user.mu / user.sigma for each player.
 //
 // D1's batch API is invoked via db.batch() for atomicity. SKILL.md § 5 — this
 // is the LAST step of endGame(); if it fails, retry (don't roll back match data
@@ -172,9 +172,9 @@ export interface InsertMatchResultInput {
 export async function insertMatchResult(db: Db, input: InsertMatchResultInput) {
   const updates = input.players.map((p) =>
     db
-      .update(users)
+      .update(user)
       .set({ mu: p.muAfter, sigma: p.sigmaAfter })
-      .where(eq(users.id, p.userId)),
+      .where(eq(user.id, p.userId)),
   )
   const inserts = [
     db.insert(matches).values(input.match),

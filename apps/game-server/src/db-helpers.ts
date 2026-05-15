@@ -1,8 +1,7 @@
 import {
   createDb,
   insertMatchResult,
-  users,
-  type Db,
+  user,
   type NewMatch,
   type NewMatchPlayer,
   type NewMmrHistory,
@@ -17,11 +16,6 @@ const webCrypto = (
   globalThis as unknown as { crypto: { randomUUID(): string } }
 ).crypto
 
-// Defaults match packages/rating/constants.ts. Inlined to avoid a runtime import
-// from rating just for two numbers when seeding new dev users.
-const INITIAL_MU = 25
-const INITIAL_SIGMA = 25 / 3
-
 export interface PlayerMeta {
   readonly playerId: string
   readonly displayName: string
@@ -31,12 +25,10 @@ export interface PlayerMeta {
 // and continues if this throws; the game-end notification still goes out.
 //
 // Pipeline:
-//   1. Ensure each player has a `user` row. Auth.js v5 owns this in production;
-//      the dev-token bridge seeds minimal rows here so the match_player FK
-//      passes. Synthetic email "<playerId>@dev.local" is replaced once Auth.js
-//      v5 lands and the dev-token endpoint is retired.
-//   2. Snapshot pre-match mu/sigma from those rows (post-ensure, so missing
-//      rows pick up schema defaults of 25 / 25/3).
+//   1. Verify every player has a `user` row. SKILL.md § 1 — no guest play, so
+//      Better Auth has already created the row at sign-in. We surface a clear
+//      error if the invariant is somehow broken (FK violation otherwise).
+//   2. Snapshot pre-match mu/sigma from those rows.
 //   3. Build SeatResult[] from the final GameState. v1 ranks the winner as
 //      finishingPosition=1 and everyone else as 2 (TrueSkill handles tied
 //      ranks). True elimination order needs a per-seat `eliminatedAtTurn`
@@ -53,13 +45,23 @@ export async function persistMatchResult(
 ): Promise<void> {
   const db = createDb(d1)
 
-  await ensureUsers(db, players)
-
   const userIds = players.map((p) => p.playerId)
   const existing = await db
-    .select({ id: users.id, mu: users.mu, sigma: users.sigma })
-    .from(users)
-    .where(inArray(users.id, userIds))
+    .select({ id: user.id, mu: user.mu, sigma: user.sigma })
+    .from(user)
+    .where(inArray(user.id, userIds))
+
+  if (existing.length !== userIds.length) {
+    // Should never fire — every connected player has a Better Auth session
+    // (no guest play), and a session implies a `user` row. Surface loudly so
+    // the upstream identity invariant is fixed at the source, not papered over.
+    const found = new Set(existing.map((u) => u.id))
+    const missing = userIds.filter((id) => !found.has(id))
+    throw new Error(
+      `persistMatchResult: missing user rows for ${missing.join(', ')}`,
+    )
+  }
+
   const ratingByUserId = new Map<string, { mu: number; sigma: number }>(
     existing.map((u) => [u.id, { mu: u.mu, sigma: u.sigma }]),
   )
@@ -70,9 +72,10 @@ export async function persistMatchResult(
   }
 
   const seatResults: SeatResult[] = finalState.seats.map((seat) => {
-    const rating = ratingByUserId.get(seat.playerId) ?? {
-      mu: INITIAL_MU,
-      sigma: INITIAL_SIGMA,
+    const rating = ratingByUserId.get(seat.playerId)
+    if (!rating) {
+      // Defensive — the existence check above should have caught this.
+      throw new Error(`persistMatchResult: no rating for "${seat.playerId}"`)
     }
     return {
       playerId: seat.playerId,
@@ -126,26 +129,4 @@ export async function persistMatchResult(
     players: matchPlayersRows,
     history,
   })
-}
-
-async function ensureUsers(db: Db, players: readonly PlayerMeta[]): Promise<void> {
-  const userIds = players.map((p) => p.playerId)
-  const existing = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(inArray(users.id, userIds))
-  const existingSet = new Set(existing.map((u) => u.id))
-  const missing = players.filter((p) => !existingSet.has(p.playerId))
-  if (missing.length === 0) return
-  // Synthetic dev email. Auth.js v5 owns this flow in production; this branch
-  // exists so the dev-token bridge doesn't crash on first game-end. The Auth.js
-  // wiring will replace the dev-token endpoint entirely (SKILL.md § 5).
-  await db.insert(users).values(
-    missing.map((p) => ({
-      id: p.playerId,
-      email: `${p.playerId}@dev.local`,
-      name: p.displayName,
-      displayName: p.displayName,
-    })),
-  )
 }

@@ -16,6 +16,7 @@
     "@coup-online/game-logic": "workspace:*",
     "@coup-online/protocol": "workspace:*",
     "@coup-online/rating": "workspace:*",
+    "better-auth": "^1.3",
     "drizzle-orm": "^0.36",
     "hono": "^4",
     "jose": "^5"

@@ -240,19 +240,24 @@ SKILL.md § 5 — full flow:
 
 | Step | Where | Behavior |
 |---|---|---|
-| 1. JWT issuance | Next.js `app/api/ws-token/route.ts` (production) or Worker `POST /api/dev-token` (dev mode until Auth.js lands) | HS256-signed claims `{ userId, displayName, exp }`, 5-minute expiry |
-| 2. Origin allowlist | Worker entry route `GET /api/ws` | `403` for unrecognized Origins. Hard-coded allowlist in `apps/game-server/src/origin.ts` |
+| 1. JWT issuance | Worker `POST /api/ws-token` (Hono route in `apps/game-server/src/index.ts`) | `createAuth(env).api.getSession({ headers })` reads the Better Auth cookie (forwarded by Next.js's rewrites); on session present, `signWsToken(env.WS_SIGNING_SECRET, ...)` mints an HS256 5-minute JWT with claims `{ userId, displayName }`. 401 if no session. |
+| 2. Origin allowlist | Worker entry route `GET /api/ws` | `403` for unrecognized Origins. Allowlist in `apps/game-server/src/origin.ts` |
 | 3. WS upgrade routed to DO | Worker entry → `env.GAME_ROOM.get(idFromName(matchId)).fetch(request)` | passes the upgrade request as-is |
 | 4. JWT verification | `GameRoom.fetch()` (defense-in-depth) | `verifyJwt(env.WS_SIGNING_SECRET, token)`; on failure → accept then close with code `4001` |
 | 5. Identity bound to WS | `ctx.acceptWebSocket(ws, tags)` | tags `userId:…` / `displayName:…` survive hibernation |
 | 6. Per-message rate limit | `webSocketMessage` handler | 30 messages per 5-second window; excess returns `{ type: 'rate-limit', retryAfterMs }` to that connection only |
 
-`WS_SIGNING_SECRET` is shared between Next.js and the Worker. Set in both
-environments:
-- Worker: `pnpm --filter @coup-online/game-server exec wrangler secret put WS_SIGNING_SECRET`
-- Next.js: Vercel env var `WS_SIGNING_SECRET`
-- Local dev (Worker side): `apps/game-server/.dev.vars` with `WS_SIGNING_SECRET = "..."`
-- Local dev (Next.js side): `apps/web/.env.local` with `WS_SIGNING_SECRET=...`
+The Worker also mounts Better Auth itself at `/api/auth/*` (see
+`apps/game-server/src/auth.ts` and `apps/game-server/src/index.ts`). The
+browser hits those paths on the Vercel origin and Next.js proxies them
+here via `next.config.ts` rewrites. Better Auth talks to D1 directly via
+the Drizzle adapter — no HTTP-DB bridge, no `AUTH_DB_SECRET`. SKILL.md § 2
+is preserved: auth and data live on the same runtime. See
+[`auth.md`](./auth.md).
+
+`WS_SIGNING_SECRET` lives on the Worker only — Next.js no longer signs:
+- Production: `pnpm --filter @coup-online/game-server exec wrangler secret put WS_SIGNING_SECRET`
+- Local dev: `apps/game-server/.dev.vars` with `WS_SIGNING_SECRET = "..."`
 
 ---
 
@@ -393,8 +398,9 @@ Called at the tail of every `afterMutation` while `phase === 'EXCHANGE_SELECTION
 
 At GAME_OVER, `finalizeGameEnd` calls `persistMatchResult` from
 `src/db-helpers.ts`. The helper:
-1. Ensures each player has a `user` row (dev seeding; Auth.js v5 owns this in
-   prod — synthetic `<playerId>@dev.local` email used as a bridge).
+1. Verifies every player has a `user` row (defensive check; Better Auth
+   creates the row at sign-in, and SKILL.md § 1 forbids guest play, so the
+   row always exists in practice).
 2. Snapshots pre-match mu/sigma from those rows.
 3. Builds `SeatResult[]`. Winner finishes at position 1; everyone else is
    tied at 2 (TrueSkill handles tied ranks).

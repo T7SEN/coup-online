@@ -2,29 +2,24 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { GAME_SERVER_HTTP } from '@/lib/config'
-import { getOrCreateUserId } from '@/lib/identity'
+import { authClient, signOut, useSession } from '@/lib/auth-client'
 import { generateMatchCode, parseMatchCode } from '@/lib/match-code'
+
+// Lobby page. SKILL.md § 1 — no guest play; redirect to /auth/signin if
+// no session. SKILL.md § 5 — fetch /api/ws-token (proxied to the Worker
+// via next.config.ts rewrites) to mint the WS JWT.
 
 export default function Lobby() {
   const router = useRouter()
-  const [displayName, setDisplayName] = useState('')
+  const { data: session, isPending } = useSession()
   const [matchCode, setMatchCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // userId is read inside click handlers (browser-only by definition), so no
-  // useEffect / setState dance is needed. SKILL.md § 5 hydration safety —
-  // browser-only access deferred to handler invocation.
-
-  async function fetchToken(userId: string): Promise<string | null> {
+  async function fetchToken(): Promise<string | null> {
     setError(null)
     try {
-      const res = await fetch(`${GAME_SERVER_HTTP}/api/dev-token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, displayName: displayName.trim() }),
-      })
+      const res = await fetch('/api/ws-token', { method: 'POST' })
       if (!res.ok) {
         const text = await res.text()
         setError(`Token request failed (${res.status}): ${text}`)
@@ -39,10 +34,8 @@ export default function Lobby() {
   }
 
   async function handleCreate() {
-    if (!displayName.trim()) return
     setBusy(true)
-    const userId = getOrCreateUserId()
-    const token = await fetchToken(userId)
+    const token = await fetchToken()
     if (!token) {
       setBusy(false)
       return
@@ -57,10 +50,9 @@ export default function Lobby() {
 
   async function handleJoin() {
     const id = parseMatchCode(matchCode)
-    if (!displayName.trim() || id.length === 0) return
+    if (id.length === 0) return
     setBusy(true)
-    const userId = getOrCreateUserId()
-    const token = await fetchToken(userId)
+    const token = await fetchToken()
     if (!token) {
       setBusy(false)
       return
@@ -74,40 +66,71 @@ export default function Lobby() {
       const text = await window.navigator.clipboard.readText()
       setMatchCode(parseMatchCode(text))
     } catch {
-      // Clipboard API may be unavailable (HTTP context, denied permission,
-      // older browser). The user can still paste manually with Ctrl+V — the
-      // onPaste handler below normalizes that too.
       setError('Could not read clipboard. Paste with Ctrl+V instead.')
     }
   }
 
-  const canCreate = !busy && displayName.trim().length > 0
-  const canJoin =
-    !busy && displayName.trim().length > 0 && parseMatchCode(matchCode).length > 0
+  async function handleSignOut() {
+    await signOut({
+      fetchOptions: {
+        onSuccess: () => {
+          router.push('/auth/signin')
+        },
+      },
+    })
+  }
+
+  if (isPending) {
+    return <main className="mx-auto max-w-md p-8">Loading…</main>
+  }
+  if (!session?.user) {
+    // The lobby is a Client Component, so we can't redirect from the server.
+    // Fall back to a link; no middleware in the Better Auth migration —
+    // /room/[matchId]/page.tsx (server component) is what gates app entry.
+    return (
+      <main className="mx-auto max-w-md p-8">
+        <p>
+          Please{' '}
+          <a className="text-blue-600 underline" href="/auth/signin">
+            sign in
+          </a>{' '}
+          to play.
+        </p>
+      </main>
+    )
+  }
+
+  const displayName =
+    session.user.name ?? session.user.email?.split('@')[0] ?? 'Player'
+  const canJoin = !busy && parseMatchCode(matchCode).length > 0
+  // Lint: authClient is imported for type-flow but only used indirectly
+  // through useSession + signOut. Reference it once so the import isn't
+  // flagged as unused in environments where TS pure-import detection drops
+  // the side-effect.
+  void authClient
 
   return (
     <main className="mx-auto max-w-md p-8">
-      <h1 className="mb-6 text-3xl font-semibold">Coup Online</h1>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-3xl font-semibold">Coup Online</h1>
+        <button
+          onClick={() => void handleSignOut()}
+          className="text-sm text-gray-600 hover:underline"
+        >
+          Sign out
+        </button>
+      </div>
       <p className="mb-6 text-sm text-gray-500">
-        Open three browser tabs to test a 3-player match. Each tab needs a
-        distinct display name and joins the same match code.
+        Signed in as{' '}
+        <span dir="auto" className="font-medium text-gray-700">
+          {displayName}
+        </span>
+        .
       </p>
-
-      <label className="mb-4 block">
-        <span className="block text-sm font-medium">Display name</span>
-        <input
-          dir="auto"
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          maxLength={40}
-          placeholder="e.g., Alice"
-          className="mt-1 block w-full rounded border border-gray-300 p-2"
-        />
-      </label>
 
       <button
         onClick={handleCreate}
-        disabled={!canCreate}
+        disabled={busy}
         className="mb-4 w-full rounded bg-blue-600 p-2 text-white disabled:bg-gray-300"
       >
         Create new match
@@ -123,9 +146,8 @@ export default function Lobby() {
             value={matchCode}
             onChange={(e) => setMatchCode(e.target.value)}
             onPaste={(e) => {
-              // Intercept paste to normalize URLs into the bare code before
-              // the input applies the raw paste. Lets users paste either a
-              // bare code or a full /room/<code> URL.
+              // Intercept paste to normalize URLs into the bare code. Lets
+              // users paste either a bare code or a full /room/<code> URL.
               e.preventDefault()
               const text = e.clipboardData.getData('text')
               setMatchCode(parseMatchCode(text))

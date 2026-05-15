@@ -4,6 +4,11 @@
 name = "coup-online-game-server"
 main = "src/index.ts"
 compatibility_date = "2026-05-14"
+# Required by Better Auth — it imports `node:async_hooks`. Cloudflare's
+# nodejs_compat polyfills the subset we need. SKILL.md § 5 — Web Crypto
+# remains the rule for our own code; this flag is purely so Better Auth's
+# internals don't crash at runtime.
+compatibility_flags = ["nodejs_compat"]
 
 # Durable Object bindings.
 

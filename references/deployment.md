@@ -121,11 +121,28 @@ Lists pending migrations and applies them to the production D1 instance.
 The Worker needs runtime secrets that aren't committed:
 
 ```bash
-# Shared with Next.js — used to sign and verify WS-upgrade JWTs.
+# SKILL.md § 5 — HS256 secret used to sign + verify WS-upgrade JWTs.
+# Both endpoints live on the Worker now (sign in /api/ws-token, verify in
+# the GameRoom DO), so this no longer needs to be shared with Vercel.
 pnpm --filter @coup-online/game-server exec wrangler secret put WS_SIGNING_SECRET
+
+# Better Auth core (see references/auth.md).
+pnpm --filter @coup-online/game-server exec wrangler secret put BETTER_AUTH_SECRET    # openssl rand -base64 32
+pnpm --filter @coup-online/game-server exec wrangler secret put BETTER_AUTH_URL       # https://coup.example.com (the Vercel origin)
+
+# OAuth provider credentials.
+pnpm --filter @coup-online/game-server exec wrangler secret put GOOGLE_CLIENT_ID
+pnpm --filter @coup-online/game-server exec wrangler secret put GOOGLE_CLIENT_SECRET
+pnpm --filter @coup-online/game-server exec wrangler secret put DISCORD_CLIENT_ID
+pnpm --filter @coup-online/game-server exec wrangler secret put DISCORD_CLIENT_SECRET
+
+# Resend (magic-link plugin sends via Resend REST).
+pnpm --filter @coup-online/game-server exec wrangler secret put RESEND_API_KEY
+pnpm --filter @coup-online/game-server exec wrangler secret put RESEND_FROM            # noreply@your-domain.example.com
 
 # Origin allowlist (comma-separated). REQUIRED in production — unset = dev
 # mode, which permissively matches localhost + RFC 1918 private network IPs.
+# Doubles as Better Auth's trustedOrigins.
 pnpm --filter @coup-online/game-server exec wrangler secret put ALLOWED_ORIGINS
 # Value example: "https://coup.example.com,https://www.coup.example.com"
 
@@ -183,21 +200,17 @@ In Vercel project settings → Environment Variables. **The `example.com` URLs b
 illustrative — RFC 2606 reserved-for-documentation domains. Substitute your actual
 production domain (Vercel-assigned `*.vercel.app` initially; custom domain after DNS setup).**
 
+**No auth secrets on Vercel.** Better Auth runs on the Worker (see
+references/auth.md), so Vercel only needs the public game-server URL. The
+`/api/auth/*` and `/api/ws-token` routes are rewritten to the Worker via
+[`apps/web/next.config.ts`](../apps/web/next.config.ts).
+
 | Name | Value source | Scope |
 |---|---|---|
-| `WS_SIGNING_SECRET` | Same value as the Worker's secret | Production, Preview |
-| `NEXTAUTH_URL` | `https://your-domain.example.com` | Production |
-| `NEXTAUTH_SECRET` | `openssl rand -base64 32` | Production, Preview |
-| `AUTH_GOOGLE_ID` | From Google Cloud Console | Production, Preview |
-| `AUTH_GOOGLE_SECRET` | From Google Cloud Console | Production, Preview |
-| `AUTH_DISCORD_ID` | From Discord Developer Portal | Production, Preview |
-| `AUTH_DISCORD_SECRET` | From Discord Developer Portal | Production, Preview |
-| `AUTH_RESEND_KEY` | From Resend (free) | Production, Preview |
-| `EMAIL_FROM` | A verified sender on Resend, e.g., `noreply@coup.example.com` | Production, Preview |
-| `NEXT_PUBLIC_WS_URL` | `wss://ws.coup.example.com` (or the workers.dev URL with `wss://`) | Production, Preview |
+| `NEXT_PUBLIC_GAME_SERVER_HTTP` | `https://ws.coup.example.com` — public Worker URL (browser uses; WS URL derived; rewrites use this too) | Production, Preview |
+| `NEXT_PUBLIC_GAME_SERVER_WS` | Optional explicit `wss://…` override (browser) | Production, Preview |
 | `NEXT_PUBLIC_SENTRY_DSN` | From Sentry | Production, Preview |
 | `NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN` | From Cloudflare Web Analytics | Production |
-| `WORKER_INTERNAL_BASE_URL` | Internal HTTP URL for Worker (D1-proxy endpoints), e.g., `https://ws.coup.example.com` | Production, Preview |
 
 **Public vs server-side:** `NEXT_PUBLIC_*` vars ship to the browser. Anything
 sensitive (secrets, internal URLs that bypass auth) must NOT be prefixed.
@@ -233,11 +246,14 @@ Free, no event cap, no NPM package.
 
 | Secret | Where it's set | Used by |
 |---|---|---|
-| `WS_SIGNING_SECRET` | Worker (via `wrangler secret put`) AND Next.js (via Vercel env) | JWT signing (Next.js) + verification (Worker) |
-| `NEXTAUTH_SECRET` | Vercel env | Auth.js v5 session signing |
-| `AUTH_GOOGLE_ID/SECRET` | Vercel env | Auth.js v5 |
-| `AUTH_DISCORD_ID/SECRET` | Vercel env | Auth.js v5 |
-| `AUTH_RESEND_KEY` | Vercel env | Auth.js v5 email magic link |
+| `WS_SIGNING_SECRET` | Worker secret | Signs WS JWTs in `/api/ws-token` + verifies in GameRoom DO |
+| `BETTER_AUTH_SECRET` | Worker secret | Better Auth cookie / token signing |
+| `BETTER_AUTH_URL` | Worker secret | Canonical site URL (Vercel origin) — Better Auth uses for callback URLs |
+| `GOOGLE_CLIENT_ID/SECRET` | Worker secret | Better Auth Google provider |
+| `DISCORD_CLIENT_ID/SECRET` | Worker secret | Better Auth Discord provider |
+| `RESEND_API_KEY` | Worker secret | Better Auth magic-link plugin |
+| `RESEND_FROM` | Worker secret | Magic-link from-address |
+| `ALLOWED_ORIGINS` | Worker secret | Origin allowlist + Better Auth trustedOrigins |
 | `SENTRY_DSN_WORKER` | Worker secret | `@sentry/cloudflare` |
 | `NEXT_PUBLIC_SENTRY_DSN` | Vercel env (note: public — Sentry DSNs are designed to be public) | `@sentry/nextjs` |
 | `database_id` | `wrangler.toml` (committed — not a secret) | D1 binding |
@@ -251,8 +267,11 @@ For local dev:
 
 - Next.js: create `apps/web/.env.local` with the same vars. Vercel doesn't
   read this; it's purely for `pnpm --filter @coup-online/web dev`.
-- Worker: create `apps/game-server/.dev.vars` with the same `WS_SIGNING_SECRET`
-  and `SENTRY_DSN_WORKER` values. Wrangler reads this in `wrangler dev`.
+- Worker: create `apps/game-server/.dev.vars` with **every Worker secret
+  listed above** (`WS_SIGNING_SECRET`, `BETTER_AUTH_SECRET`,
+  `BETTER_AUTH_URL=http://localhost:3000`, OAuth IDs/secrets,
+  `RESEND_API_KEY`, `RESEND_FROM`, `ALLOWED_ORIGINS`, optionally
+  `SENTRY_DSN_WORKER`). Wrangler reads this in `wrangler dev`.
 
 Both files are gitignored (per root `.gitignore`).
 

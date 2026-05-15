@@ -5,8 +5,8 @@ truth for the persistence layer.
 
 **Critical architectural rule (SKILL.md § 2):** the Worker owns D1 exclusively.
 `apps/web` never imports `drizzle-orm/d1` and never receives a D1 binding.
-Auth.js adapter operations (user upsert, verification-token CRUD for magic
-links) are proxied from Next.js to the Worker via internal HTTP endpoints.
+Better Auth runs **on the Worker** with the Drizzle adapter pointed straight at
+the D1 binding — no HTTP-DB bridge (see [`auth.md`](./auth.md)).
 
 ---
 
@@ -20,49 +20,80 @@ links) are proxied from Next.js to the Worker via internal HTTP endpoints.
 | Migration apply | `wrangler d1 migrations apply` | Native Cloudflare D1 tooling |
 | SQL dialect | SQLite (D1) | No Postgres-isms — see SKILL.md § 6 |
 
-## Tables (8 total)
+## Tables (9 total — Better Auth's `session` table joined in the migration)
 
-### Auth.js v5 tables — shape dictated by `@auth/drizzle-adapter`
+### Better Auth tables — shape dictated by [better-auth.com/docs](https://better-auth.com/docs)
+
+Drizzle exports are **singular** (`user`, `session`, `account`, `verification`)
+so Better Auth's Drizzle adapter finds them by convention. Match / social
+table exports stay plural (`matches`, `friends`, etc.).
 
 #### `user`
-Auth.js managed identity plus project-specific extensions (`displayName`, `mu`,
-`sigma`, `createdAt`). Mu/sigma are **denormalized here** so the leaderboard
-query is a single `SELECT … ORDER BY (mu − 3·sigma) DESC LIMIT 100`.
+Better Auth managed identity plus project-specific extensions (`displayName`,
+`mu`, `sigma`). Mu/sigma are **denormalized here** so the leaderboard query is
+a single `SELECT … ORDER BY (mu − 3·sigma) DESC LIMIT 100`.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | text PRIMARY KEY | UUID; `$defaultFn(() => crypto.randomUUID())` |
-| `name` | text NULL | From OAuth provider |
+| `name` | text NOT NULL | From OAuth provider (Better Auth requires it) |
 | `email` | text NOT NULL UNIQUE | Required; provider must supply |
-| `emailVerified` | integer (ms) NULL | Verification timestamp |
+| `emailVerified` | integer NOT NULL DEFAULT 0 | **Boolean** (Better Auth shape) — SQLite stores as 0/1 |
 | `image` | text NULL | Avatar URL from provider |
 | `displayName` | text NULL | Project-side display name (onboarding flow fills) |
 | `mu` | real NOT NULL DEFAULT 25 | TrueSkill (SKILL.md § 3.6) |
 | `sigma` | real NOT NULL DEFAULT 8.333… | TrueSkill |
 | `createdAt` | integer (ms) NOT NULL | `unixepoch() * 1000` |
+| `updatedAt` | integer (ms) NOT NULL | `unixepoch() * 1000` |
 
-#### `account`
-OAuth account links. One user can have multiple (Google + Discord). Compound
-PK on `(provider, providerAccountId)`.
+#### `session`
+Better Auth DB-backed session. Lookups are skipped for 60 s via cookie cache
+(see `auth.ts` config) so the per-request cost is small.
 
 | Column | Type | Notes |
 |---|---|---|
+| `id` | text PRIMARY KEY | |
 | `userId` | text NOT NULL → `user.id` cascade | |
-| `type` | text NOT NULL | `'oauth' \| 'oidc' \| 'email'` |
-| `provider` | text NOT NULL | `'google' \| 'discord' \| 'resend'` |
-| `providerAccountId` | text NOT NULL | Provider-side user ID |
-| `refresh_token`, `access_token`, `expires_at`, `token_type`, `scope`, `id_token`, `session_state` | various NULL | OAuth fields |
+| `token` | text NOT NULL UNIQUE | Opaque cookie value |
+| `expiresAt` | integer (ms) NOT NULL | |
+| `ipAddress` | text NULL | |
+| `userAgent` | text NULL | |
+| `createdAt` / `updatedAt` | integer (ms) NOT NULL | |
 
-Index: `account_userId_idx` on `(userId)` for "all accounts for user X" lookups.
+Index: `session_userId_idx`.
 
-#### `verificationToken`
-Email magic-link tokens. Compound PK on `(identifier, token)`.
+#### `account`
+OAuth account links + credential rows. One user can have multiple
+(Google + Discord). Column names follow Better Auth conventions: `providerId`
+(was `provider`), `accountId` (was `providerAccountId`), camelCase tokens.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | text PRIMARY KEY | Synthetic id |
+| `userId` | text NOT NULL → `user.id` cascade | |
+| `providerId` | text NOT NULL | `'google' \| 'discord' \| 'credential' \| …` |
+| `accountId` | text NOT NULL | Provider-side user ID |
+| `accessToken`, `refreshToken`, `idToken` | text NULL | camelCase (was snake_case) |
+| `accessTokenExpiresAt`, `refreshTokenExpiresAt` | integer (ms) NULL | Timestamp columns (were integer epoch) |
+| `scope` | text NULL | |
+| `password` | text NULL | For Better Auth's credentials provider (unused while OAuth-only) |
+| `createdAt` / `updatedAt` | integer (ms) NOT NULL | |
+
+Indexes: `account_userId_idx`, `account_provider_idx` on `(providerId, accountId)`.
+
+#### `verification`
+Generic verification entries (magic links, email verification, password
+reset). Renamed from `verificationToken`; `value` was `token`.
 
 | Column | Type |
 |---|---|
+| `id` | text PRIMARY KEY |
 | `identifier` | text NOT NULL |
-| `token` | text NOT NULL |
-| `expires` | integer (ms) NOT NULL |
+| `value` | text NOT NULL |
+| `expiresAt` | integer (ms) NOT NULL |
+| `createdAt` / `updatedAt` | integer (ms) NOT NULL |
+
+Index: `verification_identifier_idx`.
 
 ### Match history
 
@@ -257,8 +288,6 @@ allowed at insert time (defaults omitted, etc.).
 
 ## v1 limitations / TBD
 
-- **No session table.** Auth.js v5 uses JWT sessions by default in this
-  project (not DB sessions), so no `session` table is defined.
 - **No D1 sessions API integration yet.** D1 supports a per-connection
   sessions API for read-your-writes consistency; the Worker doesn't use it
   yet. May matter for cases like "user just sent a friend request and

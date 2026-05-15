@@ -1,49 +1,52 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { signDevToken } from './auth'
+import { createAuth } from './auth'
 import { isOriginAllowed } from './origin'
+import { signWsToken } from './ws-token'
 
 const app = new Hono<{ Bindings: Env }>()
 
-// SKILL.md § 5 — Origin allowlist mirrored on the HTTP side (POST /api/dev-token
-// is browser-initiated). Same isOriginAllowed() that gates the WS upgrade.
+// SKILL.md § 5 — Origin allowlist on browser-facing routes. The /api/auth/*
+// and /api/ws-token paths are accessed via Next.js's `rewrites` (server-to-
+// server from Vercel), so the Origin header is typically absent there and
+// CORS is a no-op; Better Auth's `trustedOrigins` is what enforces CSRF.
+//
+// The /api/ws upgrade is browser-direct (browsers can't go through Next.js
+// rewrites for WebSockets) — that's where this CORS / Origin check matters.
 app.use(
   '/api/*',
   cors({
     origin: (origin, c) =>
       isOriginAllowed(origin, c.env.ALLOWED_ORIGINS ?? null) ? origin : null,
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
   }),
 )
 
 app.get('/health', (c) => c.json({ ok: true }))
 
-// Dev-mode JWT issuer. Replaces what Auth.js v5's `app/api/ws-token/route.ts`
-// will issue in production. The Worker is the verifier in both cases — only
-// the issuer changes.
-app.post('/api/dev-token', async (c) => {
-  let body: unknown
-  try {
-    body = await c.req.json()
-  } catch {
-    return c.json({ error: 'invalid_json' }, 400)
+// Better Auth catch-all (better-auth.com/docs). Mounts Better Auth's internal
+// router under /api/auth/*. The browser hits these paths on the Vercel origin
+// (cookies stay there); Next.js's `rewrites` proxies the request here for the
+// actual handling. Set-Cookie headers flow back through the proxy.
+app.on(['GET', 'POST'], '/api/auth/*', (c) => {
+  return createAuth(c.env).handler(c.req.raw)
+})
+
+// WS-upgrade JWT issuance. SKILL.md § 5 — after a Better Auth session check,
+// signs a 5-minute HS256 JWT with WS_SIGNING_SECRET. The Vercel rewrites
+// forward POST /api/ws-token here with the browser's session cookie attached.
+app.post('/api/ws-token', async (c) => {
+  const auth = createAuth(c.env)
+  const session = await auth.api.getSession({ headers: c.req.raw.headers })
+  if (!session?.user?.id) {
+    return c.json({ error: 'unauthorized' }, 401)
   }
-  if (typeof body !== 'object' || body === null) {
-    return c.json({ error: 'invalid_body' }, 400)
-  }
-  const { userId, displayName } = body as Record<string, unknown>
-  if (
-    typeof userId !== 'string' ||
-    userId.length === 0 ||
-    typeof displayName !== 'string' ||
-    displayName.length === 0 ||
-    displayName.length > 40
-  ) {
-    return c.json({ error: 'invalid_input' }, 400)
-  }
-  const token = await signDevToken(c.env.WS_SIGNING_SECRET, {
-    userId,
+  const displayName =
+    session.user.name ?? session.user.email?.split('@')[0] ?? 'Player'
+  const token = await signWsToken(c.env.WS_SIGNING_SECRET, {
+    userId: session.user.id,
     displayName,
   })
   return c.json({ token })

@@ -77,11 +77,11 @@ For the full deploy / secrets / env-var workflow, see [`references/deployment.md
 | Path | What lives here | Deep reference |
 |---|---|---|
 | `apps/web/` | Next.js 16 frontend (Vercel Hobby) — lobby page + `room/[matchId]` with WS-driven game UI; typed WS client in `lib/ws-client.ts` | — |
-| `apps/game-server/` | Cloudflare Worker + Hono router (`/health`, `/api/dev-token`, `/api/ws`) + GameRoom DO (full impl) + MatchmakingQueue / RoomCodeRegistry stubs + D1 binding | [`durable-objects.md`](./references/durable-objects.md), [`state-machine.md`](./references/state-machine.md) |
+| `apps/game-server/` | Cloudflare Worker + Hono router (`/health`, `/api/auth/*`, `/api/ws-token`, `/api/ws`) + Better Auth (Drizzle adapter → D1) + GameRoom DO (full impl) + MatchmakingQueue / RoomCodeRegistry stubs + D1 binding | [`durable-objects.md`](./references/durable-objects.md), [`state-machine.md`](./references/state-machine.md), [`auth.md`](./references/auth.md) |
 | `packages/protocol/` | Zod schemas for every WebSocket message + `PlayerView` type | [`state-machine.md`](./references/state-machine.md) for the contract |
 | `packages/game-logic/` | Pure Coup rules — actions, challenges, blocks, state machine, win condition | [`state-machine.md`](./references/state-machine.md), [`coding-patterns.md`](./references/coding-patterns.md) |
 | `packages/rating/` | TrueSkill wrapper for N-player free-for-all rating + leaderboard display | [`rating.md`](./references/rating.md) |
-| `packages/db/` | Drizzle schema (8 tables: Auth.js + match + social) + D1 migrations + reusable queries | [`db-schema.md`](./references/db-schema.md) |
+| `packages/db/` | Drizzle schema (9 tables: Better Auth + match + social) + D1 migrations + reusable queries | [`db-schema.md`](./references/db-schema.md) |
 | `references/` | Deep-topic guides loaded on demand | this file |
 
 ## When you need to...

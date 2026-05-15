@@ -1,13 +1,13 @@
 ---
 name: coup-online
-description: Engineering guide for Coup Online — a 3–6 player real-time competitive social-deduction card game adapting Coup (Rikki Tahta, Indie Boards & Cards, 2012) to the web. Repo github.com/T7SEN/coup-online. LOAD for ANY task in this repo: features, fixes, game-rule implementation, action/challenge/block state machine, lobby + matchmaking, TrueSkill rating, WebSocket protocol, Durable Objects, deployment, server actions, auth. Triggers: Coup, social deduction, bluffing card game, Duke, Assassin, Captain, Ambassador, Contessa, influence card, challenge, block, counteraction, Durable Object, DO Hibernation, SQLite-backed DO, matchmaking, TrueSkill, MMR, 3-6 players, hidden information, server-authoritative, PlayerView, Coup Online, T7SEN, GSAP, Flip plugin, Cloudflare D1. Stack: Next.js 16, React 19, Tailwind v4, shadcn/ui, Cloudflare Workers + Durable Objects (SQLite-backed only), Hono, Cloudflare D1 + Drizzle, Auth.js v5 (Google + Discord + email magic link), Zod, GSAP + @gsap/react + Flip plugin, ts-trueskill, pnpm workspaces. Free-tier only — no paid services in v1. Enforces patterns invisible to training: server-authoritative card state, per-recipient PlayerView slicing on every broadcast, Hibernation-API WebSockets, SQLite-backed DOs (free-tier requirement), Worker-owned D1 (no direct Next.js D1 access), strict action-state-machine phase guards, mandatory-Coup at 10 coins, challenge-race tie-break by server timestamp, Web Crypto only (no Math.random, no node:crypto), Drizzle on Workers (no Prisma, no Neon), Auth.js v5 with Google + Discord only (no GitHub provider in v1), Tailwind v4 CSS-first (no tailwind.config.ts), GSAP for animations (no Framer Motion), TrueSkill for rating (no Elo/Glicko-2), Cloudflare Web Analytics (no Vercel Analytics). Skipping produces card-leak vulnerabilities, illegal game states, replay-poisoned shuffles, broken challenge races, paid-tier bills, or matches that don't update ratings correctly.
+description: Engineering guide for Coup Online — a 3–6 player real-time competitive social-deduction card game adapting Coup (Rikki Tahta, Indie Boards & Cards, 2012) to the web. Repo github.com/T7SEN/coup-online. LOAD for ANY task in this repo: features, fixes, game-rule implementation, action/challenge/block state machine, lobby + matchmaking, TrueSkill rating, WebSocket protocol, Durable Objects, deployment, server actions, auth. Triggers: Coup, social deduction, bluffing card game, Duke, Assassin, Captain, Ambassador, Contessa, influence card, challenge, block, counteraction, Durable Object, DO Hibernation, SQLite-backed DO, matchmaking, TrueSkill, MMR, 3-6 players, hidden information, server-authoritative, PlayerView, Coup Online, T7SEN, GSAP, Flip plugin, Cloudflare D1. Stack: Next.js 16, React 19, Tailwind v4, shadcn/ui, Cloudflare Workers + Durable Objects (SQLite-backed only), Hono, Cloudflare D1 + Drizzle, Better Auth on the Worker (Google + Discord + email magic link), Zod, GSAP + @gsap/react + Flip plugin, ts-trueskill, pnpm workspaces. Free-tier only — no paid services in v1. Enforces patterns invisible to training: server-authoritative card state, per-recipient PlayerView slicing on every broadcast, Hibernation-API WebSockets, SQLite-backed DOs (free-tier requirement), Worker-owned D1 (no direct Next.js D1 access), strict action-state-machine phase guards, mandatory-Coup at 10 coins, challenge-race tie-break by server timestamp, Web Crypto only (no Math.random, no node:crypto), Drizzle on Workers (no Prisma, no Neon), Better Auth co-located with D1 on the Worker (no Auth.js / next-auth at any version), Tailwind v4 CSS-first (no tailwind.config.ts), GSAP for animations (no Framer Motion), TrueSkill for rating (no Elo/Glicko-2), Cloudflare Web Analytics (no Vercel Analytics). Skipping produces card-leak vulnerabilities, illegal game states, replay-poisoned shuffles, broken challenge races, paid-tier bills, or matches that don't update ratings correctly.
 ---
 
 # Coup Online — Pre-Flight Skill
 
 Canonical agent guide for the Coup Online project — a faithful web adaptation of the Coup card game (Rikki Tahta, 2012) for 3–6 players, real-time, with persistent accounts, public matchmaking, ELO ranking, and spectator mode.
 
-When this skill is loaded, run the pre-flight checklist below before any code or proposal. The game's mechanics dictate the architecture: server authority is non-negotiable, hidden information must be enforced per-player on every state broadcast, and the action lifecycle contains race conditions only the server can resolve. **The project is free-tier only** — no paid services in v1. Most of what looks "obvious" in this stack is wrong (Socket.IO, Prisma, Neon, Framer Motion, `Math.random`, `next-auth` v4 patterns, GitHub OAuth, Vercel Analytics, Glicko-2 / Elo) — read Section 6 before importing.
+When this skill is loaded, run the pre-flight checklist below before any code or proposal. The game's mechanics dictate the architecture: server authority is non-negotiable, hidden information must be enforced per-player on every state broadcast, and the action lifecycle contains race conditions only the server can resolve. **The project is free-tier only** — no paid services in v1. Most of what looks "obvious" in this stack is wrong (Socket.IO, Prisma, Neon, Framer Motion, `Math.random`, `next-auth` / Auth.js at any version, GitHub OAuth, Vercel Analytics, Glicko-2 / Elo) — read Section 6 before importing.
 
 ---
 
@@ -46,7 +46,7 @@ When unsure, ask one targeted question rather than guessing. Coup's edge cases (
 | Pacing | Real-time, single live session (~15 minutes typical) |
 | Lobby | Private rooms (6-char codes) + public matchmaking queue |
 | Platform | Web only — desktop + mobile browser |
-| Identity | Persistent accounts via Auth.js v5 (email magic link + Google + Discord). **No GitHub provider in v1.** |
+| Identity | Persistent accounts via Better Auth (email magic link + Google + Discord). **No GitHub provider in v1.** |
 | Reconnection | 30s grace, then auto-forfeit (both cards revealed, player eliminated) |
 | Communication | Free text chat in lobby only. **No chat during active game.** |
 | Eliminated players | Spectator with public info only (same view as living players) |
@@ -72,7 +72,7 @@ Pinned by `package.json` in each workspace. Do not upgrade as part of feature wo
 - **UI:** shadcn/ui (style: `radix-nova`, base: `zinc`, icons: `lucide`), `radix-ui`, `next-themes`
 - **Animation:** **GSAP** (`gsap` core) + `@gsap/react` (`useGSAP` hook for React lifecycle correctness) + `Flip` plugin (cross-component morphing for deck → hand → revealed pile). GSAP became 100% free under Webflow's stewardship in April 2025; all formerly-paid Club plugins are unrestricted. **Do not use Framer Motion / `motion` / `motion/react`** — replaced by GSAP for license consistency and animation power.
 - **State / forms:** native React 19 (`useActionState`, `useTransition`), Zod, no Redux/Zustand for game state
-- **Auth:** `next-auth` v5 / Auth.js (`@auth/core`, `@auth/drizzle-adapter`) — email magic link + Google + Discord. **GitHub provider is not configured in v1.**
+- **Auth:** **Better Auth** (`better-auth`) — runs on the Worker (same runtime as D1, per SKILL.md § 2). Browsers hit `/api/auth/*` on the Vercel origin; Next.js's `rewrites()` in `next.config.ts` proxies to the Worker so cookies stay on the Vercel origin. Providers: Google + Discord + email magic link via Resend (`better-auth/plugins/magic-link`). **GitHub provider is not configured in v1.** See `references/auth.md`.
 - **WebSocket client:** native `WebSocket` API wrapped in a typed client backed by `packages/protocol`
 - **Analytics:** **Cloudflare Web Analytics** via beacon script in `<head>`. Free, no event cap. **Do not use Vercel Analytics / Speed Insights** — they cap at 2,500 events/month on Hobby.
 - **Observability:** `@sentry/nextjs` (free tier — 5K errors/month)
@@ -93,8 +93,8 @@ Pinned by `package.json` in each workspace. Do not upgrade as part of feature wo
 - **Database:** **Cloudflare D1** (SQLite, accessed via Worker D1 binding). 5 GB free storage, 5M rows read/day, 100K writes/day on the free tier.
 - **ORM:** `drizzle-orm` + `drizzle-orm/d1` adapter + `drizzle-kit` migrations
 - **Migration tool:** `drizzle-kit generate` (authoring) + `wrangler d1 migrations apply` (deploy)
-- **Tables:** `users`, `accounts`, `verification_tokens` (Auth.js — sessions are JWT, not DB), `friends`, `friend_requests`, `matches`, `match_players`, `mmr_history`
-- **Access pattern:** **The Worker owns D1 exclusively.** All D1 reads and writes happen inside `apps/game-server`. Next.js never imports `drizzle-orm/d1` and never receives a D1 binding. Auth.js operations (user upsert on first sign-in, verification-token CRUD for magic links) are proxied from Next.js to the Worker via internal HTTP endpoints. This keeps the database surface inside one runtime and avoids cross-platform D1 access plumbing.
+- **Tables:** `user`, `session`, `account`, `verification` (Better Auth — DB-backed sessions with a 60 s cookie cache), `friend`, `friend_request`, `match`, `match_player`, `mmr_history`
+- **Access pattern:** **The Worker owns D1 exclusively.** All D1 reads and writes happen inside `apps/game-server`. Next.js never imports `drizzle-orm/d1` and never receives a D1 binding. Better Auth lives on the Worker with the Drizzle adapter pointed directly at the D1 binding — no HTTP-DB bridge. Next.js proxies `/api/auth/*` to the Worker via `rewrites()`.
 - **SQL dialect:** SQLite. **No Postgres-specific features** (no JSONB, no `array` columns, no `RETURNING *` with complex types, no materialized views, no partial indexes with function predicates). Use portable SQL or SQLite-native equivalents.
 
 ### Rating — `packages/rating`
@@ -109,7 +109,7 @@ Pinned by `package.json` in each workspace. Do not upgrade as part of feature wo
 - **`packages/protocol`** — Zod schemas + TypeScript types for every WebSocket message (both directions). The contract between web client and game server.
 - **`packages/game-logic`** — Pure functions implementing Coup rules. No I/O, no framework dependencies. Vitest-tested.
 
-**Anti-hallucination:** before writing any import, consult Section 6. Common drift items: `socket.io`, `prisma`, `@neondatabase/serverless`, `postgres.js`, `next-auth` v4 patterns, `tailwind.config.ts`, `pages/` directory, `node:crypto`, `redis` as primary state store, `express`, `motion` / `motion/react` (Framer Motion), GitHub OAuth in Auth.js config, `@vercel/analytics`, `@vercel/speed-insights`, Glicko-2 / Elo math. None belong here.
+**Anti-hallucination:** before writing any import, consult Section 6. Common drift items: `socket.io`, `prisma`, `@neondatabase/serverless`, `postgres.js`, `next-auth` / Auth.js (any version), `@auth/*` adapters, `tailwind.config.ts`, `pages/` directory, `node:crypto`, `redis` as primary state store, `express`, `motion` / `motion/react` (Framer Motion), GitHub OAuth, `@vercel/analytics`, `@vercel/speed-insights`, Glicko-2 / Elo math. None belong here.
 
 > **Deep dives:** deployment workflow (account setup, secrets, free-tier limits, monetization migration) is in [`references/deployment.md`](./references/deployment.md). The full anti-hallucination inventory with rationale per substitution is in [`references/anti-hallucination.md`](./references/anti-hallucination.md).
 
@@ -287,7 +287,7 @@ Apply without prompting. These are codebase-wide conventions.
 - **Sentry on both ends.** `@sentry/nextjs` in `apps/web`, `@sentry/cloudflare` in `apps/game-server`. Tag every event with `matchId` when in a game.
 - **No `console.log` in committed code.** Use a `logger` utility that no-ops in production and routes to Sentry breadcrumbs in development.
 - **MMR write is the last step of `endGame()`** — after all other match-result persistence succeeds. If MMR write fails, retry; do not roll back match data.
-- **WebSocket auth — issuance.** Client requests a short-lived JWT from a Next.js Route Handler (`app/api/ws-token/route.ts`). The handler reads the Auth.js session, signs `{ userId, displayName, exp }` with `WS_SIGNING_SECRET` (shared env var between Next.js and the Worker, HS256, 5-minute expiry). Cookies do not transfer cleanly from the Next.js domain to the Workers domain — JWT is the bridge.
+- **WebSocket auth — issuance.** Client POSTs to `/api/ws-token` on the Vercel origin; Next.js's `rewrites()` forwards to the Worker's `/api/ws-token` route, which calls Better Auth's `auth.api.getSession({ headers })` to read the session cookie and signs `{ userId, displayName, exp }` with `WS_SIGNING_SECRET` (HS256, 5-minute expiry). Worker owns both signing and verification — Next.js is a transparent proxy.
 - **WebSocket auth — verification.** The DO verifies the JWT on every upgrade before accepting the connection. Token in the query string (`?token=...`). Invalid or expired token → 4001 close code. The verified `userId` is bound to the connection for the session.
 - **Origin header validation.** On the Worker side, every WebSocket upgrade request must have its `Origin` header validated against an allowlist (production Next.js origin + `localhost:3000` for dev). Reject unrecognized origins with HTTP 403. This blocks cross-origin WebSocket hijacking, which Workers and `Origin`-unvalidated WS servers are vulnerable to.
 - **Per-connection rate limiting.** Cap inbound WebSocket messages at 30 per 5-second window per connection. Excess messages dropped server-side, with a `{ type: "rate-limit", retryAfterMs }` error sent back to that connection only. Stops a misbehaving client from burning DO CPU on duplicate challenges.
@@ -310,9 +310,9 @@ If a search result, training memory, or autocomplete suggests one of these — i
 | `prisma`, `@prisma/client`, `schema.prisma` | Drizzle ORM with the `drizzle-orm/d1` adapter. Edge-compatible, type-safe, free on Workers. Prisma is not Workers-native. |
 | **`@neondatabase/serverless`, `postgres.js`, Neon Postgres** | **Cloudflare D1** (SQLite) via Worker binding + `drizzle-orm/d1`. D1 has a more generous free tier (5 GB vs 0.5 GB), keeps the stack on one platform, and removes the cross-runtime driver problem. |
 | **Postgres-specific SQL** (JSONB, native arrays, `RETURNING *` with complex types, materialized views, partial indexes with function predicates, `tsvector`, range types) | **D1 is SQLite.** Use portable SQL or SQLite-native equivalents (JSON stored as TEXT + `json_extract`; arrays as joined rows; FTS via SQLite FTS5 extension). |
-| **Direct D1 queries from Next.js / Vercel** (`drizzle-orm/d1` imported in `apps/web`, D1 REST API client) | **Worker owns D1 exclusively.** Next.js never sees a D1 binding. All DB operations from the frontend go through HTTP endpoints on the Worker. Auth.js operations (user upsert, verification tokens) are proxied. |
-| `next-auth` v4 patterns (`[...nextauth].ts` in `pages/api`, `getServerSession`, `NextAuthOptions`) | Auth.js v5 — `auth()` helper, route handler in `app/api/auth/[...nextauth]/route.ts`, config in `auth.ts`, `getServerSession` does not exist. |
-| **GitHub OAuth provider in Auth.js config** | **Not in v1.** Providers are Google + Discord + email magic link. Adding GitHub requires explicit spec amendment. |
+| **Direct D1 queries from Next.js / Vercel** (`drizzle-orm/d1` imported in `apps/web`, D1 REST API client) | **Worker owns D1 exclusively.** Next.js never sees a D1 binding. All DB operations live on the Worker. Better Auth runs on the Worker too (Drizzle adapter → D1 binding); Next.js proxies `/api/auth/*` via `rewrites()`. |
+| `next-auth` / Auth.js (any version), `@auth/core`, `@auth/drizzle-adapter`, `[...nextauth].ts`, `getServerSession`, `NextAuthOptions` | **Better Auth** (`better-auth`) on the Worker. Auth.js was tried and retired in favor of Better Auth + D1 + Drizzle adapter co-located on Cloudflare. See `references/auth.md`. |
+| **GitHub OAuth provider** | **Not in v1.** Providers are Google + Discord + email magic link (via `better-auth/plugins/magic-link` + Resend). Adding GitHub requires explicit spec amendment. |
 | `tailwind.config.ts`, `tailwind.config.js` | Tailwind v4 CSS-first. All config in `globals.css` via `@theme` directive. |
 | `pages/` directory, `getServerSideProps`, `getStaticProps`, `getInitialProps` | App Router only. Server Components default. |
 | `node:crypto`, `crypto` module from Node | Web Crypto: `crypto.randomUUID()`, `crypto.getRandomValues()`. Workers don't have `node:crypto`. |
@@ -328,7 +328,7 @@ If a search result, training memory, or autocomplete suggests one of these — i
 | Yjs, Automerge, or any CRDT for game state | Game state is server-authoritative, not collaborative. CRDTs would let clients propose state — exactly what we prevent. |
 | `useEffect` for data fetching in Server Components | Server Components don't have effects. Fetch in the async component body. |
 | `npm`, `yarn`, `yarn.lock`, `package-lock.json` | `pnpm` and `pnpm-lock.yaml`. Monorepo via pnpm workspaces. |
-| `localStorage` for session token | HTTP-only cookies (Auth.js handles this on the web side). WebSocket auth is a signed JWT in the upgrade query string, in memory only. |
+| `localStorage` for session token | HTTP-only cookies (Better Auth manages these). WebSocket auth is a signed JWT in the upgrade query string, in memory only. |
 | Class components, `componentDidMount`, `setState({...})` | Functional components + hooks only. |
 | Storing card identities in Redux / Zustand / React state | Server is the truth. Client state is a *cache* of the latest `PlayerView` broadcast — opaque hidden tokens, never inferred identities. |
 | WebRTC for game state or chat | Game state goes through the server. WebRTC was considered for voice chat, which is banned. |
@@ -361,7 +361,7 @@ Refuse these immediately with a one-line rationale. Do not implement, do not ask
 | Use Neon Postgres or any Postgres database | Stack is on D1 (SQLite); Postgres adds a separate billing surface and cross-runtime driver pain |
 | Use Postgres-specific SQL (JSONB, arrays, materialized views) | D1 is SQLite; use portable SQL |
 | Direct D1 access from Next.js / Vercel | Worker owns D1; Next.js proxies through Worker endpoints |
-| Use `next-auth` v4 patterns | We're on Auth.js v5; APIs differ significantly |
+| Use `next-auth` / Auth.js (any version) | We're on Better Auth. Skill: better-auth-best-practices. APIs differ entirely. |
 | Add GitHub OAuth as a provider | Not in v1 — providers are Google + Discord + email magic link |
 | Use Framer Motion / `motion` for animations | GSAP + `@gsap/react` + Flip plugin; license alignment + animation power |
 | Use Glicko-2 / Elo / pairwise rating | TrueSkill via `ts-trueskill` — N-player free-for-all is its native case |
@@ -416,35 +416,33 @@ coup-online/                            # github.com/T7SEN/coup-online
 ├── apps/
 │   ├── web/                          # Next.js 16 frontend (Vercel Hobby — free)
 │   │   ├── app/
-│   │   │   ├── (auth)/login/        # Auth.js sign-in (Google + Discord + email magic link)
+│   │   │   ├── auth/signin/         # Sign-in page (Google + Discord + email magic link via Better Auth client)
 │   │   │   ├── (app)/
 │   │   │   │   ├── play/            # Public matchmaking entry
 │   │   │   │   ├── room/[code]/     # Private room join + game UI
 │   │   │   │   ├── profile/         # User profile, match history
 │   │   │   │   └── leaderboard/     # Public top-100 (TrueSkill conservative rating)
-│   │   │   ├── api/auth/[...nextauth]/route.ts
-│   │   │   ├── api/ws-token/route.ts # Issues short-lived JWT for WS upgrade
 │   │   │   └── layout.tsx           # Cloudflare Web Analytics beacon in <head>
+│   │   │   # /api/auth/* and /api/ws-token are NOT route handlers — next.config.ts rewrites them to the Worker
 │   │   ├── components/
 │   │   │   ├── game/                # Card, Hand, ActionBar, ChallengeButton, BlockButton, InfluenceLossPrompt, ExchangeSelector (GSAP-animated)
 │   │   │   ├── lobby/               # ChatBox, PlayerList, RoomCodeShare
 │   │   │   └── ui/                  # shadcn primitives
 │   │   ├── lib/
 │   │   │   ├── ws-client.ts         # Typed WebSocket client (uses packages/protocol)
-│   │   │   ├── auth.ts              # Auth.js config — proxies adapter calls to Worker
-│   │   │   └── worker-client.ts     # Typed HTTP client for Worker D1-proxy endpoints
+│   │   │   ├── auth-client.ts       # Better Auth React client (createAuthClient + magicLinkClient)
+│   │   │   └── get-server-session.ts # Server-component session helper (forwards cookie to Worker /api/auth/get-session)
+│   │   ├── next.config.ts           # rewrites() /api/auth/:path* and /api/ws-token → Worker
 │   │   └── package.json
 │   └── game-server/                  # Cloudflare Worker + DOs (Workers Free plan)
 │       ├── src/
-│       │   ├── index.ts             # Worker entry, Hono router
+│       │   ├── index.ts             # Worker entry, Hono router (mounts /api/auth/* + /api/ws-token + /api/ws)
 │       │   ├── do-game-room.ts      # GameRoom Durable Object (SQLite-backed)
 │       │   ├── do-matchmaking.ts    # MatchmakingQueue DO (SQLite-backed)
 │       │   ├── do-room-codes.ts     # RoomCodeRegistry DO (SQLite-backed)
-│       │   ├── routes/
-│       │   │   ├── auth-proxy.ts    # D1 CRUD endpoints called by Next.js Auth.js
-│       │   │   └── ws-upgrade.ts    # WebSocket upgrade with JWT + Origin validation
-│       │   ├── db.ts                # D1 binding access via Drizzle
-│       │   └── auth.ts              # JWT verification for WS handshake
+│       │   ├── auth.ts              # Better Auth factory (Drizzle adapter → D1) + WS-JWT verifier
+│       │   ├── ws-token.ts          # HS256 5-min WS-JWT signer
+│       │   └── db-helpers.ts        # Match-result persistence helper
 │       ├── wrangler.toml            # Bindings: GameRoom, MatchmakingQueue, RoomCodeRegistry (all sqlite_classes), DB (d1_database)
 │       └── package.json
 └── packages/
@@ -530,7 +528,7 @@ This skill is the entry point. Deeper, on-demand material lives in `references/*
 | Deployment — Vercel Hobby, Cloudflare Workers Free, D1, env vars, secrets, free-tier limits, monetization migration | [`references/deployment.md`](./references/deployment.md) | ✓ exists |
 | D1 schema, Drizzle queries, migration conventions, Worker-owned access pattern | [`references/db-schema.md`](./references/db-schema.md) | ✓ exists |
 | Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations, GameRoom impl | [`references/durable-objects.md`](./references/durable-objects.md) | ✓ exists |
-| Auth.js v5 configuration, JWT for WS handshake, Google + Discord + magic link providers, D1-proxy auth adapter | `references/auth.md` | planned |
+| Better Auth configuration on the Worker, JWT for WS handshake, Google + Discord + magic link providers, Next.js rewrites topology | [`references/auth.md`](./references/auth.md) | ✓ exists |
 | GSAP animation patterns (Flip plugin, useGSAP hook, performance) | `references/animations.md` | planned |
 | TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula | [`references/rating.md`](./references/rating.md) | ✓ exists |
 

@@ -262,30 +262,42 @@ Portable equivalents in `references/anti-hallucination.md`."
 `drizzle-orm/d1` in Next.js doesn't compile against the Workers binding shape.
 Even if it did, it'd bypass the Worker's authorization boundary.
 
-**Alternative:** Worker owns D1. Next.js calls Worker HTTP endpoints. Auth.js
-adapter operations are proxied.
+**Alternative:** Worker owns D1. Better Auth runs on the Worker too with the
+Drizzle adapter pointed at the D1 binding directly. Next.js proxies
+`/api/auth/*` via `next.config.ts` rewrites.
 
 **Refusal template:** "Refused — Worker owns D1 exclusively (SKILL.md § 2 / § 6).
-Next.js proxies through Worker HTTP endpoints."
+Better Auth lives on the Worker; Next.js proxies via rewrites."
 
 ---
 
-### Use `next-auth` v4 patterns
+### Use `next-auth` / Auth.js (any version)
 
 **Trigger phrasings:**
 - "Let me write the `[...nextauth].ts` config…"
 - "Just import `getServerSession`…"
 - "`NextAuthOptions` …"
+- "Add `@auth/drizzle-adapter`…"
+- "Use Auth.js v5's `auth()` helper…"
 
-**Why refuse:** Auth.js v5 (the renamed v4) restructured the API. v4 patterns
-won't compile against v5.
+**Why refuse:** This project previously used Auth.js v5 and has migrated off
+it. Any Auth.js / next-auth import, schema convention, or helper is wrong
+here — the column names (`providerId` vs `provider`, `value` vs `token`),
+session model (DB-backed with cookie cache), route handler, and adapter
+contract all differ. Mixing the two breaks the schema and the cookie flow.
 
-**Alternative:** Auth.js v5 — `auth()` helper, route handler in
-`app/api/auth/[...nextauth]/route.ts`, config in `lib/auth.ts`.
+**Alternative:** Better Auth (`better-auth`). The project's auth lives at:
+- `apps/game-server/src/auth.ts` — `betterAuth({...})` factory
+- `apps/game-server/src/index.ts` — `app.on(['GET','POST'], '/api/auth/*', …)`
+- `apps/web/lib/auth-client.ts` — `createAuthClient` from `better-auth/react`
+- `apps/web/next.config.ts` — rewrites `/api/auth/:path*` to the Worker
+- Skills: `better-auth-best-practices`, `better-auth-security-best-practices`,
+  `email-and-password-best-practices`
+- Reference: [`auth.md`](./auth.md)
 
-**Refusal template:** "Refused — using Auth.js v5, not next-auth v4. v4
-patterns (`getServerSession`, `NextAuthOptions`) don't exist in v5. See
-`references/coding-patterns.md` § 17."
+**Refusal template:** "Refused — project is on Better Auth, not Auth.js /
+next-auth. The two have incompatible schemas, route handlers, and cookie
+flows. See `references/auth.md`."
 
 ---
 

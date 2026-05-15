@@ -1,36 +1,125 @@
-import { jwtVerify, SignJWT } from 'jose'
+import { betterAuth } from 'better-auth'
+import { drizzleAdapter } from 'better-auth/adapters/drizzle'
+import { magicLink } from 'better-auth/plugins/magic-link'
+import { createDb } from '@coup-online/db'
+import * as schema from '@coup-online/db'
+import { jwtVerify } from 'jose'
 
-// SKILL.md § 5 — WebSocket auth.
-//   Issuance: signed with WS_SIGNING_SECRET (shared between Next.js and Worker), HS256, 5-minute expiry.
-//   Verification: DO checks JWT on every upgrade; invalid/expired → 4001 close code.
+// Better Auth lives on the Worker (SKILL.md § 2 — D1 is Worker-exclusive).
+// The Drizzle adapter binds directly to `env.DB`; there is no HTTP-DB bridge.
 //
-// In production, the Next.js Route Handler at app/api/ws-token/route.ts is the
-// canonical issuer (after Auth.js v5 lands). Until then, the Worker exposes
-// /api/dev-token (signDevToken below) for testing without Auth.js.
+// `createAuth(env)` is invoked per-request because Workers expose env on the
+// request boundary, not at module-load time. Better Auth caches enough
+// internal state to keep this cheap. See references/auth.md.
+
+export function createAuth(env: Env) {
+  const db = createDb(env.DB)
+  const trustedOrigins = (env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+
+  return betterAuth({
+    appName: 'Coup Online',
+    secret: env.BETTER_AUTH_SECRET,
+    baseURL: env.BETTER_AUTH_URL,
+    // CSRF protection. Production: comma-separated allowlist. Dev: include
+    // localhost + Next.js's LAN URL (Next.js auto-binds 0.0.0.0). The
+    // origin.ts allowlist for /api/ws is independent of this.
+    trustedOrigins:
+      trustedOrigins.length > 0
+        ? trustedOrigins
+        : ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    database: drizzleAdapter(db, {
+      provider: 'sqlite',
+      // Map Better Auth's expected model names to our Drizzle exports.
+      // packages/db/src/schema.ts uses singular exports (`user`, `session`,
+      // `account`, `verification`) so this map is a passthrough — kept
+      // explicit for clarity.
+      schema: {
+        user: schema.user,
+        session: schema.session,
+        account: schema.account,
+        verification: schema.verification,
+      },
+    }),
+    // SKILL.md § 5 — DB-backed sessions with a 60-second cookie cache to
+    // skip per-request DB lookups for hot reads (the typical case during
+    // gameplay). Tradeoff: session revocation propagates up to 60s after
+    // the row is deleted.
+    session: {
+      cookieCache: {
+        enabled: true,
+        maxAge: 60,
+      },
+    },
+    socialProviders: {
+      google: {
+        clientId: env.GOOGLE_CLIENT_ID,
+        clientSecret: env.GOOGLE_CLIENT_SECRET,
+      },
+      discord: {
+        clientId: env.DISCORD_CLIENT_ID,
+        clientSecret: env.DISCORD_CLIENT_SECRET,
+      },
+    },
+    plugins: [
+      magicLink({
+        // Better Auth doesn't ship an emailer. We send via Resend's REST API
+        // directly — no SDK, just fetch.
+        sendMagicLink: async ({ email, url }) => {
+          const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${env.RESEND_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: env.RESEND_FROM,
+              to: email,
+              subject: 'Your Coup Online sign-in link',
+              html: magicLinkEmail(url),
+              text: `Sign in to Coup Online: ${url}`,
+            }),
+          })
+          if (!res.ok) {
+            const body = await res.text().catch(() => '')
+            throw new Error(`Resend send failed: ${res.status} ${body}`)
+          }
+        },
+      }),
+    ],
+  })
+}
+
+// Minimal HTML body. Intentionally inline — no template engine, no images,
+// no marketing. The user clicked "send me a link"; this is the link.
+function magicLinkEmail(url: string): string {
+  return `<!doctype html>
+<html><body style="font-family: system-ui, sans-serif; line-height: 1.5;">
+  <h2>Sign in to Coup Online</h2>
+  <p>Click the link below to sign in. It expires in a few minutes and only works once.</p>
+  <p><a href="${url}" style="color: #2563eb;">${url}</a></p>
+  <p style="color: #6b7280; font-size: 0.875rem;">If you didn't request this, you can ignore the email.</p>
+</body></html>`
+}
+
+// ============================================================================
+// WS-upgrade JWT verification (separate from Better Auth sessions).
+// ============================================================================
+//
+// SKILL.md § 5 — every WS upgrade verifies this 5-minute JWT, signed with
+// WS_SIGNING_SECRET. Sign side lives in apps/game-server/src/ws-token.ts;
+// Next.js does NOT sign WS tokens anymore — the /api/ws-token Worker route
+// does, after a Better Auth session check.
 
 const ALG = 'HS256'
-const DEFAULT_EXPIRY_SECONDS = 300 // 5 minutes per SKILL.md § 5
 
 export interface JwtClaims {
   readonly userId: string
   readonly displayName: string
 }
 
-export async function signDevToken(
-  secret: string,
-  claims: JwtClaims,
-  expirySeconds = DEFAULT_EXPIRY_SECONDS,
-): Promise<string> {
-  const key = new TextEncoder().encode(secret)
-  return new SignJWT({ userId: claims.userId, displayName: claims.displayName })
-    .setProtectedHeader({ alg: ALG })
-    .setIssuedAt()
-    .setExpirationTime(`${expirySeconds}s`)
-    .sign(key)
-}
-
-// Returns null on any verification failure. Caller closes WS with 4001 on null
-// (SKILL.md § 5).
 export async function verifyJwt(secret: string, token: string): Promise<JwtClaims | null> {
   try {
     const key = new TextEncoder().encode(secret)

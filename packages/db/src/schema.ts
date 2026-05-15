@@ -6,6 +6,12 @@ import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm
 // Drizzle is the ORM (Workers-native, edge-compatible; no Prisma — SKILL.md § 6).
 // All columns use SQLite-portable types (text / integer / real). No JSONB,
 // no native arrays, no Postgres-isms (SKILL.md § 6).
+//
+// Auth tables follow Better Auth's expected shape (better-auth.com/docs).
+// Schema exports for auth tables are SINGULAR (`user`, `session`, `account`,
+// `verification`) to match Better Auth's default model names — that lets the
+// Drizzle adapter find them without an explicit schema map. Match / social
+// tables stay plural (existing convention).
 
 // Web Crypto handle. crypto is global in both Cloudflare Workers and Node 20+
 // (drizzle-kit migration generation runs in Node). globalThis cast is the
@@ -15,24 +21,21 @@ const webCrypto = (
 ).crypto
 
 // ============================================================================
-// Auth.js v5 tables
+// Better Auth tables — shape dictated by better-auth/adapters/drizzle.
 // ============================================================================
-// Shape dictated by `@auth/drizzle-adapter`. Table and column names must stay
-// as-is for the adapter to find them. The Worker proxies Auth.js adapter calls
-// from Next.js (Worker-owned D1 per SKILL.md § 2 / § 6).
 
-export const users = sqliteTable('user', {
+export const user = sqliteTable('user', {
   // Server-generated UUID via crypto.randomUUID() (SKILL.md § 5 — Web Crypto only).
   id: text('id')
     .primaryKey()
     .$defaultFn(() => webCrypto.randomUUID()),
-  // Display name from the OAuth provider. NULL until the user picks one or the
-  // OAuth provider returned one.
-  name: text('name'),
+  // Display name from the OAuth provider; required by Better Auth (see skill).
+  name: text('name').notNull(),
   // Email from the provider; UNIQUE because each user has at most one.
   email: text('email').notNull().unique(),
-  // Auth.js convention — set to the timestamp the email was verified, NULL otherwise.
-  emailVerified: integer('emailVerified', { mode: 'timestamp_ms' }),
+  // Better Auth uses BOOLEAN here (not a timestamp). SQLite stores as integer
+  // 0/1 via Drizzle's boolean mode.
+  emailVerified: integer('emailVerified', { mode: 'boolean' }).notNull().default(false),
   // Avatar URL from the OAuth provider, NULL otherwise.
   image: text('image'),
   // ----- Coup-specific extensions on the same row (denormalized for the
@@ -43,43 +46,94 @@ export const users = sqliteTable('user', {
   // TrueSkill rating. Defaults match SKILL.md § 3.6.
   mu: real('mu').notNull().default(25),
   sigma: real('sigma').notNull().default(25.0 / 3.0),
+  // Better Auth maintains createdAt / updatedAt on every auth table.
   createdAt: integer('createdAt', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updatedAt', { mode: 'timestamp_ms' })
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
 })
 
-export const accounts = sqliteTable(
-  'account',
+// Better Auth's DB-backed session. Cookie cache (60s) skips this for hot reads.
+export const session = sqliteTable(
+  'session',
   {
+    id: text('id').primaryKey(),
     userId: text('userId')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    type: text('type').notNull(), // 'oauth' | 'oidc' | 'email'
-    provider: text('provider').notNull(), // 'google' | 'discord' | 'resend' (magic link)
-    providerAccountId: text('providerAccountId').notNull(),
-    refresh_token: text('refresh_token'),
-    access_token: text('access_token'),
-    expires_at: integer('expires_at'),
-    token_type: text('token_type'),
-    scope: text('scope'),
-    id_token: text('id_token'),
-    session_state: text('session_state'),
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Opaque session token stored in the cookie. Better Auth makes this unique.
+    token: text('token').notNull().unique(),
+    expiresAt: integer('expiresAt', { mode: 'timestamp_ms' }).notNull(),
+    ipAddress: text('ipAddress'),
+    userAgent: text('userAgent'),
+    createdAt: integer('createdAt', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updatedAt', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
   },
-  (account) => ({
-    compoundKey: primaryKey({ columns: [account.provider, account.providerAccountId] }),
-    userIdIdx: index('account_userId_idx').on(account.userId),
+  (s) => ({
+    userIdIdx: index('session_userId_idx').on(s.userId),
   }),
 )
 
-export const verificationTokens = sqliteTable(
-  'verificationToken',
+// OAuth provider account links + credential-provider rows (the `password`
+// column is for the credentials provider; nullable for OAuth-only accounts).
+// Column names follow Better Auth conventions: providerId (was provider),
+// accountId (was providerAccountId), camelCase token fields.
+export const account = sqliteTable(
+  'account',
   {
-    identifier: text('identifier').notNull(),
-    token: text('token').notNull(),
-    expires: integer('expires', { mode: 'timestamp_ms' }).notNull(),
+    id: text('id').primaryKey(),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    providerId: text('providerId').notNull(), // 'google' | 'discord' | 'credential' | …
+    accountId: text('accountId').notNull(), // Provider-side user ID
+    accessToken: text('accessToken'),
+    refreshToken: text('refreshToken'),
+    idToken: text('idToken'),
+    accessTokenExpiresAt: integer('accessTokenExpiresAt', { mode: 'timestamp_ms' }),
+    refreshTokenExpiresAt: integer('refreshTokenExpiresAt', { mode: 'timestamp_ms' }),
+    scope: text('scope'),
+    // Credentials provider hash. Unused while we're OAuth + magic link only;
+    // present so the schema doesn't have to change if we add email/password
+    // later.
+    password: text('password'),
+    createdAt: integer('createdAt', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updatedAt', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
   },
-  (vt) => ({
-    compoundKey: primaryKey({ columns: [vt.identifier, vt.token] }),
+  (a) => ({
+    userIdIdx: index('account_userId_idx').on(a.userId),
+    providerIdx: index('account_provider_idx').on(a.providerId, a.accountId),
+  }),
+)
+
+// Generic "verification" entries — used for magic links, email verification,
+// password reset, etc.
+export const verification = sqliteTable(
+  'verification',
+  {
+    id: text('id').primaryKey(),
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: integer('expiresAt', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: integer('createdAt', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updatedAt', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (v) => ({
+    identifierIdx: index('verification_identifier_idx').on(v.identifier),
   }),
 )
 
@@ -104,7 +158,7 @@ export const matches = sqliteTable(
     // varies. The DO ensures consistency in the transactional write.
     winnerUserId: text('winnerUserId')
       .notNull()
-      .references(() => users.id),
+      .references(() => user.id),
     seatCount: integer('seatCount').notNull(), // 3-6 per SKILL.md § 1
   },
   (m) => ({
@@ -120,7 +174,7 @@ export const matchPlayers = sqliteTable(
       .references(() => matches.id, { onDelete: 'cascade' }),
     userId: text('userId')
       .notNull()
-      .references(() => users.id),
+      .references(() => user.id),
     // 0-indexed seat order at game start (immutable for the match — SKILL.md § 4.2).
     seat: integer('seat').notNull(),
     // 1-indexed finishing position (1 = winner). Matches packages/rating's
@@ -149,7 +203,7 @@ export const mmrHistory = sqliteTable(
       .$defaultFn(() => webCrypto.randomUUID()),
     userId: text('userId')
       .notNull()
-      .references(() => users.id),
+      .references(() => user.id),
     // Nullable to support non-match rating adjustments (admin corrections,
     // future seasonal resets) without forging a synthetic match row.
     matchId: text('matchId').references(() => matches.id, { onDelete: 'set null' }),
@@ -178,10 +232,10 @@ export const friends = sqliteTable(
   {
     userId: text('userId')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => user.id, { onDelete: 'cascade' }),
     friendUserId: text('friendUserId')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => user.id, { onDelete: 'cascade' }),
     createdAt: integer('createdAt', { mode: 'timestamp_ms' })
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
@@ -196,10 +250,10 @@ export const friendRequests = sqliteTable(
   {
     fromUserId: text('fromUserId')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => user.id, { onDelete: 'cascade' }),
     toUserId: text('toUserId')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => user.id, { onDelete: 'cascade' }),
     createdAt: integer('createdAt', { mode: 'timestamp_ms' })
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
@@ -214,12 +268,14 @@ export const friendRequests = sqliteTable(
 // Inferred row types — re-exported for consumers.
 // ============================================================================
 
-export type User = typeof users.$inferSelect
-export type NewUser = typeof users.$inferInsert
-export type Account = typeof accounts.$inferSelect
-export type NewAccount = typeof accounts.$inferInsert
-export type VerificationToken = typeof verificationTokens.$inferSelect
-export type NewVerificationToken = typeof verificationTokens.$inferInsert
+export type User = typeof user.$inferSelect
+export type NewUser = typeof user.$inferInsert
+export type Session = typeof session.$inferSelect
+export type NewSession = typeof session.$inferInsert
+export type Account = typeof account.$inferSelect
+export type NewAccount = typeof account.$inferInsert
+export type Verification = typeof verification.$inferSelect
+export type NewVerification = typeof verification.$inferInsert
 export type Match = typeof matches.$inferSelect
 export type NewMatch = typeof matches.$inferInsert
 export type MatchPlayer = typeof matchPlayers.$inferSelect
