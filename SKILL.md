@@ -532,6 +532,6 @@ This skill is the entry point. Deeper, on-demand material lives in `references/*
 | Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations | `references/durable-objects.md` | planned (lands with GameRoom DO implementation) |
 | Auth.js v5 configuration, JWT for WS handshake, Google + Discord + magic link providers, D1-proxy auth adapter | `references/auth.md` | planned |
 | GSAP animation patterns (Flip plugin, useGSAP hook, performance) | `references/animations.md` | planned |
-| TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula | `references/rating.md` | planned (lands with `packages/rating`) |
+| TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula | [`references/rating.md`](./references/rating.md) | ✓ exists |
 
 Until a reference exists, this SKILL.md is the single source for that topic. Treat its sections as authoritative.

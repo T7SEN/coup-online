@@ -80,7 +80,7 @@ For the full deploy / secrets / env-var workflow, see [`references/deployment.md
 | `apps/game-server/` | Cloudflare Worker + 3 Durable Objects + D1 binding | [`state-machine.md`](./references/state-machine.md) for what the DOs implement |
 | `packages/protocol/` | Zod schemas for every WebSocket message + `PlayerView` type | [`state-machine.md`](./references/state-machine.md) for the contract |
 | `packages/game-logic/` | Pure Coup rules — actions, challenges, blocks, state machine, win condition | [`state-machine.md`](./references/state-machine.md), [`coding-patterns.md`](./references/coding-patterns.md) |
-| `packages/rating/` | TrueSkill wrapper (not yet implemented) | — |
+| `packages/rating/` | TrueSkill wrapper for N-player free-for-all rating + leaderboard display | [`rating.md`](./references/rating.md) |
 | `packages/db/` | Drizzle schema + D1 migrations (not yet implemented) | — |
 | `references/` | Deep-topic guides loaded on demand | this file |
 
