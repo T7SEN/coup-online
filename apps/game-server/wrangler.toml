@@ -33,3 +33,5 @@ new_sqlite_classes = ["GameRoom", "MatchmakingQueue", "RoomCodeRegistry"]
 binding = "DB"
 database_name = "coup-online-db"
 database_id = "4420c671-5adb-4a9b-8c7d-24bc031946cb"
+# Drizzle migrations live in packages/db; wrangler d1 migrations apply uses this path.
+migrations_dir = "../../packages/db/drizzle/migrations"

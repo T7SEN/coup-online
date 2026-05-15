@@ -12,7 +12,13 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "hono": "^4"
+    "@coup-online/db": "workspace:*",
+    "@coup-online/game-logic": "workspace:*",
+    "@coup-online/protocol": "workspace:*",
+    "@coup-online/rating": "workspace:*",
+    "drizzle-orm": "^0.36",
+    "hono": "^4",
+    "jose": "^5"
   },
   "devDependencies": {
     "@eslint/js": "^9",

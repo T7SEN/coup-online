@@ -174,6 +174,35 @@ describe('buildPlayerView — hidden-information invariant (SKILL.md § 3.1)', (
   })
 })
 
+describe('buildPlayerView — influenceLossPlayerId', () => {
+  it('is null when influenceLossQueue is empty', () => {
+    const view = buildPlayerView(makeTestState(), 'p0')
+    expect(view.influenceLossPlayerId).toBeNull()
+  })
+
+  it('exposes the head of the influence-loss queue', () => {
+    const state: GameState = {
+      ...makeTestState(),
+      phase: 'INFLUENCE_LOSS',
+      influenceLossQueue: ['p2', 'p1'],
+    }
+    expect(buildPlayerView(state, 'p0').influenceLossPlayerId).toBe('p2')
+    expect(buildPlayerView(state, 'p2').influenceLossPlayerId).toBe('p2')
+  })
+
+  it('does not leak any card identities — only the playerId', () => {
+    const state: GameState = {
+      ...makeTestState(),
+      phase: 'INFLUENCE_LOSS',
+      influenceLossQueue: ['p1'],
+    }
+    const view = buildPlayerView(state, 'p0')
+    expect(view.influenceLossPlayerId).toBe('p1')
+    // Bob's face-down cards still hidden from Alice.
+    expect(view.seats[1].influence).toStrictEqual([{ status: 'hidden' }, { status: 'hidden' }])
+  })
+})
+
 describe('buildPlayerView — pending state passthrough', () => {
   it('passes pendingAction through unchanged when set', () => {
     const state: GameState = {

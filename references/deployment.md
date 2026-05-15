@@ -124,6 +124,11 @@ The Worker needs runtime secrets that aren't committed:
 # Shared with Next.js — used to sign and verify WS-upgrade JWTs.
 pnpm --filter @coup-online/game-server exec wrangler secret put WS_SIGNING_SECRET
 
+# Origin allowlist (comma-separated). REQUIRED in production — unset = dev
+# mode, which permissively matches localhost + RFC 1918 private network IPs.
+pnpm --filter @coup-online/game-server exec wrangler secret put ALLOWED_ORIGINS
+# Value example: "https://coup.example.com,https://www.coup.example.com"
+
 # Sentry DSN for the cloudflare worker.
 pnpm --filter @coup-online/game-server exec wrangler secret put SENTRY_DSN_WORKER
 ```

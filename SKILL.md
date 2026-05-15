@@ -528,8 +528,8 @@ This skill is the entry point. Deeper, on-demand material lives in `references/*
 | Expanded § 7 refusal catalog with rationale and drop-in refusal phrasings | [`references/refusal-catalog.md`](./references/refusal-catalog.md) | ✓ exists |
 | Code style — TS conventions, naming, imports, comments, tests, formatting, configs | [`references/code-style.md`](./references/code-style.md) | ✓ exists |
 | Deployment — Vercel Hobby, Cloudflare Workers Free, D1, env vars, secrets, free-tier limits, monetization migration | [`references/deployment.md`](./references/deployment.md) | ✓ exists |
-| D1 schema, Drizzle queries, migration conventions, Worker-owned access pattern | `references/db-schema.md` | planned (lands with `packages/db`) |
-| Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations | `references/durable-objects.md` | planned (lands with GameRoom DO implementation) |
+| D1 schema, Drizzle queries, migration conventions, Worker-owned access pattern | [`references/db-schema.md`](./references/db-schema.md) | ✓ exists |
+| Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations, GameRoom impl | [`references/durable-objects.md`](./references/durable-objects.md) | ✓ exists |
 | Auth.js v5 configuration, JWT for WS handshake, Google + Discord + magic link providers, D1-proxy auth adapter | `references/auth.md` | planned |
 | GSAP animation patterns (Flip plugin, useGSAP hook, performance) | `references/animations.md` | planned |
 | TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula | [`references/rating.md`](./references/rating.md) | ✓ exists |

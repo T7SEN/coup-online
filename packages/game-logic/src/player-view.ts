@@ -45,6 +45,10 @@ export function buildPlayerView(state: GameState, viewerId: PlayerId): PlayerVie
     pendingAction: state.pendingAction,
     pendingBlock: state.pendingBlock,
     timerEndsAt: state.timerEndsAt,
+    // Head of the queue (current picker), or null when empty. Public so clients
+    // can gate the InfluencePickBar to the right player without leaking other
+    // hidden state. SKILL.md § 3.1 — no card identities here, only the playerId.
+    influenceLossPlayerId: state.influenceLossQueue[0] ?? null,
   }
 }
 

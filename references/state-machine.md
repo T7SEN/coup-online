@@ -220,10 +220,11 @@ include verbatim in `server-messages::error`:
 
 ## V1 limitations
 
-- **`influenceLossQueue[0]` and `exchangePool` not exposed in `PlayerView`.** Other
-  players can derive the picker from `pendingAction` for Coup but not for
-  challenge-driven losses. UX gap. Future enhancement: add
-  `influenceLossTarget: PlayerId | null` to `PlayerView`.
+- **`exchangePool` not exposed in `PlayerView`.** Other players don't see the
+  pool contents (correctly, by hidden-info rules), but they also don't see
+  that one is open beyond the public `phase === 'EXCHANGE_SELECTION'`. UX
+  gap; not an information leak. The picker themselves receives a private
+  `prompt` message with the 4 cards.
 - **Exchange requires exactly 2 face-down cards.** 1-card players (with one already
   revealed) can't do Exchange because the protocol's `client-messages::exchange-pick.keepIndices`
   is fixed-length 2. Standard Coup allows 1-card Exchange (keep 1 of 3); future
@@ -231,8 +232,39 @@ include verbatim in `server-messages::error`:
 - **Eliminated players keep their coins.** No mechanical impact (they can't act,
   can't be targeted, can't block), but the coin total on the table includes dead
   players' piles. Standard Coup rules don't strictly require zeroing.
-- **Forfeit-on-disconnect not implemented.** SKILL.md § 3.5 — the DO's 30s alarm
-  + auto-reveal logic lives at the DO layer, not in pure game-logic.
+- **Tied finishing positions at game end.** v1 ranks the winner as position 1
+  and everyone else as position 2 (TrueSkill handles ties correctly). True
+  elimination-order ranking needs a per-seat `eliminatedAtTurn` field —
+  future pass.
+
+`influenceLossPlayerId` IS exposed in `PlayerView` so clients can gate the
+InfluencePickBar to the right player. SKILL.md § 3.1 is preserved — only the
+playerId is exposed, no card identities.
+
+## Forfeit handling — SKILL.md § 3.5
+
+`forfeitPlayer(state, playerId)` in `packages/game-logic/src/forfeit.ts`
+applies a 30s-disconnect forfeit at the game-state level. Called by
+`apps/game-server/src/do-game-room.ts::alarm()` when a disconnect deadline
+expires. Effect:
+
+1. Every face-down card in the player's hand flips to `revealed`. Seat goes
+   `!isAlive` and `isDisconnected = true`.
+2. The player is filtered out of `influenceLossQueue`.
+3. If they were the Ambassador actor (`exchangePool.actorPlayerId === playerId`),
+   the 4-card pool returns to the Court Deck (reshuffled per SKILL.md § 4.6
+   anonymity rule) and `exchangePool` is nulled.
+4. If they were the actor of a pending action, the action and any pending
+   block evaporate. If they were the blocker of a pending block, both the
+   block AND the parent action evaporate (conservative v1 choice).
+5. Phase transitions:
+   - `influenceLossQueue` non-empty → `INFLUENCE_LOSS` (next picker)
+   - `exchangePool` still set (forfeitee wasn't the actor) → `EXCHANGE_SELECTION`
+   - else → `concludeTurn` (advances to next living seat, or `GAME_OVER` if
+     this forfeit eliminated the second-to-last player)
+
+Idempotent on already-eliminated seats. Covered by
+`packages/game-logic/test/forfeit.test.ts` (11 tests).
 
 ## Where to extend
 

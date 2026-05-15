@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { Action, BlockerCharacter } from './domain'
+import { Action, BlockerCharacter, PlayerId } from './domain'
 
 // Inbound from the client. ALL inbound messages MUST be Zod-validated at the DO
 // boundary (SKILL.md § 5). Clients can send arbitrary bytes — never trust them.
@@ -41,5 +41,17 @@ export const ClientMessage = z.discriminatedUnion('type', [
     type: z.literal('chat'),
     text: z.string().min(1).max(500),
   }),
+
+  // Explicit start request. Only the lobby host (first joiner; auto-transferred
+  // on host-leave) may send this, and only when 3-6 players are present
+  // (SKILL.md § 1 — 3-6 players). Server validates host + count + phase and
+  // transitions LOBBY → IN_GAME via dealInitialState. First message wins;
+  // subsequent ones bounce with not_in_lobby.
+  z.object({ type: z.literal('start-game') }),
+
+  // Host kicks a lobby player. Only valid during LOBBY phase, only from the
+  // host, and only targeting a non-self lobby player. Server removes the
+  // target from the lobby and closes their WebSocket with code 4004.
+  z.object({ type: z.literal('kick'), playerId: PlayerId }),
 ])
 export type ClientMessage = z.infer<typeof ClientMessage>

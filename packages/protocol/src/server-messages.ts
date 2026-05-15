@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CardKind, PlayerId } from './domain'
+import { CardKind, MatchId, PlayerId } from './domain'
 import { PlayerView } from './player-view'
 
 // Server → Client private prompts. Each is sent to a single connection, never broadcast.
@@ -25,6 +25,27 @@ export type Prompt = z.infer<typeof Prompt>
 // Outbound to a single client. Like inbound, validated against this schema before send
 // (SKILL.md § 5 — Zod-validate every WS message at the DO boundary, both directions).
 export const ServerMessage = z.discriminatedUnion('type', [
+  // Pre-game lobby update. Sent while phase is LOBBY (before the host presses
+  // Start). Replaced by `state-update` once dealInitialState fires. `canStart`
+  // is true iff the current lobby size is within the legal start range
+  // (SKILL.md § 1 — 3-6 players); clients enable the Start button on this flag.
+  // `hostPlayerId` identifies the lobby host (first joiner, auto-transferred
+  // on host-leave). Only the host may press Start or Kick.
+  z.object({
+    type: z.literal('lobby-update'),
+    matchId: MatchId,
+    hostPlayerId: PlayerId,
+    players: z.array(
+      z.object({
+        playerId: PlayerId,
+        displayName: z.string(),
+      }),
+    ),
+    minPlayersToStart: z.number().int().positive(),
+    maxPlayers: z.number().int().positive(),
+    canStart: z.boolean(),
+  }),
+
   // Per-recipient sliced state. Build via buildPlayerView(state, playerId).
   // SKILL.md § 3.1 — never inline the slicing; never broadcast raw GameState.
   z.object({ type: z.literal('state-update'), view: PlayerView }),

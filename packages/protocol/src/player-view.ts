@@ -61,5 +61,10 @@ export const PlayerView = z.object({
   // Server-authoritative timer deadline (unix ms). Client renders countdown locally.
   // Null when no timer is active (e.g., INFLUENCE_LOSS-by-other-player, GAME_OVER).
   timerEndsAt: z.number().int().nonnegative().nullable(),
+  // Head of the server's influenceLossQueue, or null when the queue is empty.
+  // Exposed so clients only render the InfluencePickBar to the player who is
+  // actually being asked to pick — avoids server-rejected `not_your_pick`
+  // errors from non-picker clicks. SKILL.md § 4.7.
+  influenceLossPlayerId: PlayerId.nullable(),
 })
 export type PlayerView = z.infer<typeof PlayerView>
