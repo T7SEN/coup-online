@@ -506,18 +506,18 @@ When in doubt:
 
 ---
 
-## 12. References (To Be Added)
+## 12. References
 
-This skill is the entry point. As the project grows, deeper material should move to `references/*.md` and be loaded on demand. Anticipated splits:
+This skill is the entry point. Deeper, on-demand material lives in `references/*.md`.
 
-| Task involves... | Future reference file |
-|---|---|
-| Detailed state-machine transitions + edge cases (chained challenges, exchange + simultaneous influence-loss) | `references/state-machine.md` |
-| D1 schema, Drizzle queries, migration conventions, Worker-owned access pattern | `references/db-schema.md` |
-| Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations | `references/durable-objects.md` |
-| Auth.js v5 configuration, JWT for WS handshake, Google + Discord + magic link providers, D1-proxy auth adapter | `references/auth.md` |
-| Deployment (Vercel Hobby, Cloudflare Workers Free, D1), env vars, secrets, free-tier limits | `references/deployment.md` |
-| GSAP animation patterns (Flip plugin, useGSAP hook, performance) | `references/animations.md` |
-| TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula | `references/rating.md` |
+| Task involves... | Reference file | Status |
+|---|---|---|
+| Detailed state-machine transitions, queue/pool semantics, error codes, v1 limitations | `references/state-machine.md` | ✓ exists |
+| D1 schema, Drizzle queries, migration conventions, Worker-owned access pattern | `references/db-schema.md` | planned (lands with `packages/db`) |
+| Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations | `references/durable-objects.md` | planned (lands with GameRoom DO implementation) |
+| Auth.js v5 configuration, JWT for WS handshake, Google + Discord + magic link providers, D1-proxy auth adapter | `references/auth.md` | planned |
+| Deployment (Vercel Hobby, Cloudflare Workers Free, D1), env vars, secrets, free-tier limits | `references/deployment.md` | planned |
+| GSAP animation patterns (Flip plugin, useGSAP hook, performance) | `references/animations.md` | planned |
+| TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula | `references/rating.md` | planned (lands with `packages/rating`) |
 
-Until these exist, this SKILL.md is the single source. Treat its sections as authoritative.
+Until a reference exists, this SKILL.md is the single source for that topic. Treat its sections as authoritative.

@@ -291,11 +291,10 @@ describe('applyExchangeTimeout', () => {
 // --- exchange_requires_two_cards edge --------------------------------------
 
 describe('Exchange — one-influence edge case', () => {
-  it('rejects Exchange when actor has only 1 face-down card (v1 limitation)', () => {
+  it('rejects Exchange at declaration when actor has only 1 face-down card (v1 limitation)', () => {
     const state = setupExchange(true)
     state.seats[0].influence[1] = { status: 'revealed', kind: 'Captain' }
-    applyExchange(state, 'p0')
-    try { applyChallengeWindowTimeout(state); throw new Error('!') }
+    try { applyExchange(state, 'p0'); throw new Error('!') }
     catch (e) { expect((e as IllegalActionError).code).toBe('exchange_requires_two_cards') }
   })
 })

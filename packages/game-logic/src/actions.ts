@@ -1,5 +1,5 @@
 import type { Action, Phase, PlayerId } from '@coup-online/protocol'
-import { drawFromDeck, shuffle } from './deck'
+import { drawFromDeck, returnToDeckAndShuffle } from './deck'
 import type { GameState, ServerSeat } from './state'
 import { checkWinner } from './win-condition'
 
@@ -67,13 +67,12 @@ function requireNotForcedToCoup(actor: ServerSeat): void {
 }
 
 // Validate that a target for a targeted action (Coup, Steal, Assassinate) is
-// legal: not self, exists in the seat list, alive. Returns the target seat for
-// convenience. Shared by Coup / Steal / Assassinate.
+// legal: not self, exists in the seat list, alive. Shared by Coup / Steal / Assassinate.
 function requireTargetValid(
   state: GameState,
   actorPlayerId: PlayerId,
   targetPlayerId: PlayerId,
-): ServerSeat {
+): void {
   if (actorPlayerId === targetPlayerId) {
     throw new IllegalActionError(
       'cannot_target_self',
@@ -93,7 +92,6 @@ function requireTargetValid(
       `Target "${targetPlayerId}" has already been eliminated`,
     )
   }
-  return target
 }
 
 // --- Effect helpers (exported for use by challenges.ts / blocks.ts) ---
@@ -122,15 +120,9 @@ export function applyActionEffect(
       return
     case 'Steal': {
       // SKILL.md § 4.4 — Captain → Steal: take up to 2 coins from target
-      // (or all if target has fewer). Targeting an alive seat is already
-      // validated by applyStealAction; defensively re-resolve here.
-      const target = state.seats.find((s) => s.playerId === action.targetPlayerId)
-      if (!target) {
-        throw new IllegalActionError(
-          'invalid_target',
-          `Steal target "${action.targetPlayerId}" not seated`,
-        )
-      }
+      // (or all if target has fewer). Target validated at applyStealAction time;
+      // getActor here is defense-in-depth against state-inconsistency bugs.
+      const target = getActor(state, action.targetPlayerId)
       const amount = Math.min(2, target.coins)
       target.coins -= amount
       actor.coins += amount
@@ -185,10 +177,7 @@ export function replaceCardWithDraw(
   if (card.status !== 'face-down') {
     throw new Error(`replaceCardWithDraw: card at index ${cardIdx} must be face-down`)
   }
-  state.courtDeck.push(card.kind)
-  const reshuffled = shuffle(state.courtDeck)
-  state.courtDeck.length = 0
-  for (const c of reshuffled) state.courtDeck.push(c)
+  returnToDeckAndShuffle(state.courtDeck, [card.kind])
   const replacement = state.courtDeck.pop()
   if (!replacement) {
     throw new Error('replaceCardWithDraw: court deck is empty')
@@ -368,12 +357,24 @@ export function applyAssassinate(
 // Exchange — SKILL.md § 4.4. Claims Ambassador. Challengeable. Not blockable.
 // On no-challenge resolution, applyActionEffect sets up exchangePool and the
 // phase advances to EXCHANGE_SELECTION via resolveAfterEffects().
+//
+// v1 limitation: requires exactly 2 face-down cards (protocol's keepIndices is
+// fixed-length 2). Checked at declaration for immediate feedback rather than
+// surfacing the error at challenge-window timeout. Defense-in-depth check still
+// lives in applyActionEffect for direct-call safety.
 export function applyExchange(state: GameState, actorPlayerId: PlayerId): GameState {
   requirePhase(state, 'AWAITING_ACTION')
   const actor = getActor(state, actorPlayerId)
   requireTurnOwnership(state, actorPlayerId)
   requireAlive(actor)
   requireNotForcedToCoup(actor)
+  const faceDownCount = actor.influence.filter((inf) => inf.status === 'face-down').length
+  if (faceDownCount !== 2) {
+    throw new IllegalActionError(
+      'exchange_requires_two_cards',
+      `Exchange currently requires 2 face-down cards; actor has ${faceDownCount}`,
+    )
+  }
   state.phase = 'CHALLENGE_WINDOW'
   state.pendingAction = { actorPlayerId, action: { kind: 'Exchange' } }
   return state
@@ -526,10 +527,7 @@ export function applyExchangePick(
     }
   }
   // Return the unchosen 2 cards to the Court Deck and reshuffle. SKILL.md § 4.6.
-  for (const c of returned) state.courtDeck.push(c)
-  const reshuffled = shuffle(state.courtDeck)
-  state.courtDeck.length = 0
-  for (const c of reshuffled) state.courtDeck.push(c)
+  returnToDeckAndShuffle(state.courtDeck, returned)
   state.exchangePool = null
   return concludeTurn(state)
 }
