@@ -243,3 +243,15 @@ include verbatim in `server-messages::error`:
 | A new phase | `Phase` enum in `protocol/src/domain.ts` + state.ts comment + handlers | All test fixtures (rare) |
 | A new error code | Inline at the throw site; document in this file | The test that exercises the throw |
 | A new client message | `protocol/src/client-messages.ts` + a handler | `packages/game-logic/test/*.test.ts` |
+
+---
+
+## See also
+
+- **Canonical spec:** [`SKILL.md`](../SKILL.md) § 3.2 (Action Lifecycle State Machine), § 4 (Coup Rules — Definitive), § 4.6 (Challenges), § 4.7 (Influence Loss), § 4.8 (Win Condition), § 4.9 (Forced Coup at 10+ coins)
+- **Patterns this file's invariants depend on:** [`coding-patterns.md`](./coding-patterns.md) § 1 (PlayerView slicing), § 3 (phase guards), § 5 (Web Crypto randomness)
+- **What NOT to do alongside this machine:** [`anti-hallucination.md`](./anti-hallucination.md) — Server validation section, State stores section
+- **The 7 actions in source code:** `packages/game-logic/src/actions.ts`
+- **Challenge resolution in source:** `packages/game-logic/src/challenges.ts`
+- **Block resolution in source:** `packages/game-logic/src/blocks.ts`
+- **`buildPlayerView` slicer:** `packages/game-logic/src/player-view.ts`

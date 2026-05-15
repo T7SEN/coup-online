@@ -54,7 +54,7 @@ When unsure, ask one targeted question rather than guessing. Coup's edge cases (
 | Package manager | `pnpm` — never npm or yarn |
 | Repository | `github.com/T7SEN/coup-online` |
 | Cost posture | **Free tier only.** v1 ships on free Vercel Hobby + free Cloudflare Workers/D1/Web Analytics + free Sentry tier + free Resend tier. No paid services allowed without explicit approval. |
-| Production URL | TBD (to be assigned by maintainer) |
+| Production URL | Not yet deployed — assigned on first `wrangler deploy` + Vercel project creation. See [`references/deployment.md`](./references/deployment.md). |
 
 **Banned features.** Never suggest, scaffold, or reference: co-op modes, AI bot opponents, custom or "house-rule" variants, expansion characters, in-game chat (lobby-only is the spec), voice chat, card trading or gifting, real-money currencies, microtransactions/lootboxes, any mechanic that lets a player see another player's face-down cards before reveal, GitHub OAuth (not in v1 provider list), or paid-tier services without explicit approval. Each of these breaks either the game's design integrity, the v1 scope, or the free-tier budget.
 
@@ -111,6 +111,8 @@ Pinned by `package.json` in each workspace. Do not upgrade as part of feature wo
 
 **Anti-hallucination:** before writing any import, consult Section 6. Common drift items: `socket.io`, `prisma`, `@neondatabase/serverless`, `postgres.js`, `next-auth` v4 patterns, `tailwind.config.ts`, `pages/` directory, `node:crypto`, `redis` as primary state store, `express`, `motion` / `motion/react` (Framer Motion), GitHub OAuth in Auth.js config, `@vercel/analytics`, `@vercel/speed-insights`, Glicko-2 / Elo math. None belong here.
 
+> **Deep dives:** deployment workflow (account setup, secrets, free-tier limits, monetization migration) is in [`references/deployment.md`](./references/deployment.md). The full anti-hallucination inventory with rationale per substitution is in [`references/anti-hallucination.md`](./references/anti-hallucination.md).
+
 ---
 
 ## 3. Architectural Pillars
@@ -143,6 +145,8 @@ Every player turn proceeds through a strict phase sequence. The server is the on
 **Challenge race tie-break:** if two players send `challenge` messages within the same tick, the server's authoritative receive timestamp (`Date.now()` inside the DO) wins. Subsequent challenges in the same window are silently dropped — the client never learns it lost the race except by absence of effect.
 
 **Mandatory-Coup at 10 coins:** if a player starts their turn with ≥10 coins, their only legal action is Coup. The action menu must hide all other options client-side. Server enforces independently — never trust the client.
+
+> **Deep dive:** the full state machine as implemented — per-action lifecycle diagrams, queue/pool semantics for `influenceLossQueue` and `exchangePool`, the complete error-code table, and v1 limitations — is in [`references/state-machine.md`](./references/state-machine.md).
 
 ### 3.3 Durable Object Per Room
 
@@ -292,6 +296,8 @@ Apply without prompting. These are codebase-wide conventions.
 - **Three-gate verification on every code change.** Before reporting any change that touches source code as done, three gates must pass from repo root: `pnpm -r typecheck` (tsc), `pnpm -r lint`, and `pnpm -r build`. Doc-only changes (SKILL.md, AGENTS.md, `references/*.md`, READMEs, plan files) skip — there's no compile/lint/build surface to break. If a workspace doesn't yet have one of the scripts, surface the gap honestly rather than silently skipping; add the missing script if it's reasonable to do so in scope, or flag as a known follow-up. Never `--no-verify` or skip on "it's a small change."
 - **`eslint.config.mjs` per workspace sets `tsconfigRootDir`.** In every workspace's flat config, include `languageOptions: { parserOptions: { tsconfigRootDir: import.meta.dirname } }`. typescript-eslint v8's parser otherwise errors in VS Code's ESLint extension with "No tsconfigRootDir was set, and multiple candidate TSConfigRootDirs are present" because the editor's cwd is the repo root, not the workspace. `pnpm -r lint` from the CLI is unaffected (each workspace runs in its own cwd), so this only surfaces in-editor. When adding a new workspace with its own eslint config, include this block from day one.
 
+> **Deep dives:** each pattern above is expanded with code examples pulled from this codebase plus "what breaks if you skip it" in [`references/coding-patterns.md`](./references/coding-patterns.md). Surface conventions (naming, imports, comments, tests, error handling, formatting, configs) are in [`references/code-style.md`](./references/code-style.md).
+
 ---
 
 ## 6. Anti-Hallucination Inventory
@@ -331,6 +337,8 @@ If a search result, training memory, or autocomplete suggests one of these — i
 | Shared `GameState` broadcast to all clients | `PlayerView` per recipient. See § 3.1. |
 | **Paid-tier services** (Vercel Pro, Workers Paid, Neon Pro, Sentry Team, Postmark paid, Plausible) | **Free tier only in v1.** Introducing paid services requires explicit pricing discussion and approval. |
 
+> **Deep dive:** rationale per substitution (why D1 over Neon, why GSAP over Framer Motion, why TrueSkill over Glicko-2, etc.) plus a 5-item dependency-add checklist is in [`references/anti-hallucination.md`](./references/anti-hallucination.md).
+
 ---
 
 ## 7. Refusal Catalog
@@ -367,6 +375,8 @@ Refuse these immediately with a one-line rationale. Do not implement, do not ask
 | "Cheat code" or debug endpoint that reveals opponents' cards | No client-side bypass ever ships; tests use the server directly |
 | PWA / service worker / offline mode | § 3.7 — real-time game, online-required by design |
 | Universal `Math.random` + comment "good enough for shuffle" | Refuse without exception |
+
+> **Deep dive:** typical user request phrasings, full rationale per refusal, alternatives where any exist, and drop-in refusal templates (3-part standard phrasing) are in [`references/refusal-catalog.md`](./references/refusal-catalog.md).
 
 ---
 
@@ -512,11 +522,15 @@ This skill is the entry point. Deeper, on-demand material lives in `references/*
 
 | Task involves... | Reference file | Status |
 |---|---|---|
-| Detailed state-machine transitions, queue/pool semantics, error codes, v1 limitations | `references/state-machine.md` | ✓ exists |
+| Detailed state-machine transitions, queue/pool semantics, error codes, v1 limitations | [`references/state-machine.md`](./references/state-machine.md) | ✓ exists |
+| Expanded § 5 patterns with code examples, rationale, what-breaks-if-skipped | [`references/coding-patterns.md`](./references/coding-patterns.md) | ✓ exists |
+| Expanded § 6 anti-hallucination inventory with rationale per substitution | [`references/anti-hallucination.md`](./references/anti-hallucination.md) | ✓ exists |
+| Expanded § 7 refusal catalog with rationale and drop-in refusal phrasings | [`references/refusal-catalog.md`](./references/refusal-catalog.md) | ✓ exists |
+| Code style — TS conventions, naming, imports, comments, tests, formatting, configs | [`references/code-style.md`](./references/code-style.md) | ✓ exists |
+| Deployment — Vercel Hobby, Cloudflare Workers Free, D1, env vars, secrets, free-tier limits, monetization migration | [`references/deployment.md`](./references/deployment.md) | ✓ exists |
 | D1 schema, Drizzle queries, migration conventions, Worker-owned access pattern | `references/db-schema.md` | planned (lands with `packages/db`) |
 | Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations | `references/durable-objects.md` | planned (lands with GameRoom DO implementation) |
 | Auth.js v5 configuration, JWT for WS handshake, Google + Discord + magic link providers, D1-proxy auth adapter | `references/auth.md` | planned |
-| Deployment (Vercel Hobby, Cloudflare Workers Free, D1), env vars, secrets, free-tier limits | `references/deployment.md` | planned |
 | GSAP animation patterns (Flip plugin, useGSAP hook, performance) | `references/animations.md` | planned |
 | TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula | `references/rating.md` | planned (lands with `packages/rating`) |
 
