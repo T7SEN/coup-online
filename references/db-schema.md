@@ -120,7 +120,7 @@ post-match ratings. Compound PK on `(matchId, userId)`.
 | `matchId` | text NOT NULL → `match.id` cascade | |
 | `userId` | text NOT NULL → `user.id` | |
 | `seat` | integer NOT NULL | 0-indexed seat order at game start |
-| `finishingPosition` | integer NOT NULL | 1-indexed (1 = winner) — matches `packages/rating` |
+| `finishingPosition` | integer NOT NULL | 1-indexed (1 = winner), distinct per seat — derived from elimination order; see `references/rating.md` |
 | `muBefore` | real NOT NULL | |
 | `sigmaBefore` | real NOT NULL | |
 | `muAfter` | real NOT NULL | |

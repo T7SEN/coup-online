@@ -1,5 +1,5 @@
 import type { PlayerId } from '@coup-online/protocol'
-import { concludeTurn, IllegalActionError } from './actions'
+import { concludeTurn, IllegalActionError, nextEliminationOrder } from './actions'
 import { returnToDeckAndShuffle } from './deck'
 import type { GameState } from './state'
 
@@ -8,7 +8,8 @@ import type { GameState } from './state'
 // GameRoom DO).
 //
 // Effect:
-//   1. All of the player's face-down cards flip to `revealed`. They go !isAlive.
+//   1. All of the player's face-down cards flip to `revealed`. They go !isAlive
+//      and get an eliminationOrder stamp, exactly like a normal elimination.
 //   2. Any state that references this player as the active actor is cleared:
 //        - influenceLossQueue: entries for this player are removed
 //        - exchangePool: if they were the actor, both drawn cards are returned
@@ -42,6 +43,8 @@ export function forfeitPlayer(state: GameState, playerId: PlayerId): GameState {
   )
   seat.isAlive = false
   seat.isDisconnected = true
+  // A forfeit is an elimination — stamp the finishing order like any other.
+  seat.eliminationOrder = nextEliminationOrder(state)
 
   state.influenceLossQueue = state.influenceLossQueue.filter((id) => id !== playerId)
 

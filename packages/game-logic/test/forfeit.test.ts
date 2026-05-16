@@ -9,6 +9,7 @@ function seat(
     coins?: number
     influence?: ServerInfluence[]
     isDisconnected?: boolean
+    eliminationOrder?: number | null
   } = {},
 ): ServerSeat {
   return {
@@ -17,6 +18,7 @@ function seat(
     coins: opts.coins ?? 2,
     isAlive: opts.isAlive ?? true,
     isDisconnected: opts.isDisconnected ?? false,
+    eliminationOrder: opts.eliminationOrder ?? null,
     influence: opts.influence ?? [
       { status: 'face-down', kind: 'Duke' },
       { status: 'face-down', kind: 'Captain' },
@@ -50,6 +52,15 @@ describe('forfeitPlayer', () => {
     for (const inf of p1.influence) {
       expect(inf.status).toBe('revealed')
     }
+  })
+
+  it('stamps a monotonic eliminationOrder on each forfeited seat', () => {
+    const state = makeState([seat('p0'), seat('p1'), seat('p2')])
+    expect(state.seats.every((s) => s.eliminationOrder === null)).toBe(true)
+    forfeitPlayer(state, 'p1')
+    expect(state.seats.find((s) => s.playerId === 'p1')!.eliminationOrder).toBe(1)
+    forfeitPlayer(state, 'p2')
+    expect(state.seats.find((s) => s.playerId === 'p2')!.eliminationOrder).toBe(2)
   })
 
   it('preserves already-revealed card identity', () => {
@@ -148,12 +159,14 @@ describe('forfeitPlayer', () => {
   })
 
   it('flips to GAME_OVER when forfeit eliminates the second-to-last player', () => {
-    // 2 alive (p0, p1), 1 already dead (p2). Forfeiting p1 leaves only p0.
+    // 2 alive (p0, p1), 1 already dead (p2, eliminated 1st). Forfeiting p1
+    // leaves only p0 and stamps p1 as the 2nd elimination.
     const state = makeState([
       seat('p0'),
       seat('p1'),
       seat('p2', {
         isAlive: false,
+        eliminationOrder: 1,
         influence: [
           { status: 'revealed', kind: 'Duke' },
           { status: 'revealed', kind: 'Captain' },
@@ -162,6 +175,7 @@ describe('forfeitPlayer', () => {
     ])
     forfeitPlayer(state, 'p1')
     expect(state.phase).toBe('GAME_OVER')
+    expect(state.seats.find((s) => s.playerId === 'p1')!.eliminationOrder).toBe(2)
   })
 
   it('advances to next living seat when forfeitee was the turn player', () => {

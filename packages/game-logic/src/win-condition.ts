@@ -13,3 +13,36 @@ export function checkWinner(state: GameState): PlayerId | null {
   }
   return null
 }
+
+// Map each seat's playerId to its 1-based finishing position (1 = winner).
+// SKILL.md § 3.6 / § 4.8 — finishing position is the reverse of elimination
+// order: the last player eliminated places highest among the eliminated.
+//
+//   - Survivors (eliminationOrder == null) → position 1.
+//   - Eliminated seats are ranked by eliminationOrder DESCENDING — the
+//     latest-eliminated takes the best non-winning slot. With one survivor and
+//     N seats this yields the distinct positions 1..N.
+//
+// Intended to be called at GAME_OVER, where exactly one seat survives. If it is
+// ever called mid-game (multiple survivors) every survivor ties at position 1 —
+// deterministic, but only the GAME_OVER result is meaningful. The caller
+// (persistMatchResult) feeds these into TrueSkill, which ranks the match.
+export function computeFinishingPositions(state: GameState): Map<PlayerId, number> {
+  const positions = new Map<PlayerId, number>()
+
+  const survivors = state.seats.filter((s) => s.eliminationOrder == null)
+  for (const seat of survivors) {
+    positions.set(seat.playerId, 1)
+  }
+
+  const eliminated = state.seats
+    .filter((s) => s.eliminationOrder != null)
+    .sort((a, b) => (b.eliminationOrder ?? 0) - (a.eliminationOrder ?? 0))
+  let position = survivors.length + 1
+  for (const seat of eliminated) {
+    positions.set(seat.playerId, position)
+    position += 1
+  }
+
+  return positions
+}

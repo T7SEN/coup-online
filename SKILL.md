@@ -69,7 +69,8 @@ Pinned by `package.json` in each workspace. Do not upgrade as part of feature wo
 - **Runtime:** Next.js `^16` (App Router), React `^19`, TypeScript `^5`
 - **Hosting:** Vercel Hobby (free; commercial-use prohibited — when monetization begins, migrate to Cloudflare Pages or upgrade)
 - **Styling:** Tailwind CSS `^4` (CSS-first via `globals.css`, no `tailwind.config.*`), `tw-animate-css`, `tailwind-merge`
-- **UI:** shadcn/ui (style: `radix-nova`, base: `zinc`, icons: `lucide`), `radix-ui`, `next-themes`
+- **UI:** shadcn/ui (style: `radix-nova`, icons: `lucide`), `radix-ui`, `sonner` (toasts), `next-themes`. Light **"Renaissance-court"** theme — parchment / oxblood / antique gold — see [`references/design-system.md`](./references/design-system.md).
+- **Fonts:** Cinzel (display) + EB Garamond (body), self-hosted via `next/font/google`
 - **Animation:** **GSAP** (`gsap` core) + `@gsap/react` (`useGSAP` hook for React lifecycle correctness) + `Flip` plugin (cross-component morphing for deck → hand → revealed pile). GSAP became 100% free under Webflow's stewardship in April 2025; all formerly-paid Club plugins are unrestricted. **Do not use Framer Motion / `motion` / `motion/react`** — replaced by GSAP for license consistency and animation power.
 - **State / forms:** native React 19 (`useActionState`, `useTransition`), Zod, no Redux/Zustand for game state
 - **Auth:** **Better Auth** (`better-auth`) — runs on the Worker (same runtime as D1, per SKILL.md § 2). Browsers hit `/api/auth/*` on the Vercel origin; Next.js's `rewrites()` in `next.config.ts` proxies to the Worker so cookies stay on the Vercel origin. Providers: Google + Discord + email magic link via Resend (`better-auth/plugins/magic-link`). **GitHub provider is not configured in v1.** See `references/auth.md`.
@@ -529,6 +530,7 @@ This skill is the entry point. Deeper, on-demand material lives in `references/*
 | D1 schema, Drizzle queries, migration conventions, Worker-owned access pattern | [`references/db-schema.md`](./references/db-schema.md) | ✓ exists |
 | Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations, GameRoom impl | [`references/durable-objects.md`](./references/durable-objects.md) | ✓ exists |
 | Better Auth configuration on the Worker, JWT for WS handshake, Google + Discord + magic link providers, Next.js rewrites topology | [`references/auth.md`](./references/auth.md) | ✓ exists |
+| Web client design system — Renaissance-court theme, shadcn/ui, color/type tokens, component conventions | [`references/design-system.md`](./references/design-system.md) | ✓ exists |
 | GSAP animation patterns (Flip plugin, useGSAP hook, performance) | `references/animations.md` | planned |
 | TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula | [`references/rating.md`](./references/rating.md) | ✓ exists |
 

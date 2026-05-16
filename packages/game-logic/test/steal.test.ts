@@ -17,6 +17,7 @@ function seat(playerId: string, c1: CardKind, c2: CardKind, coins = 2): ServerSe
     coins,
     isAlive: true,
     isDisconnected: false,
+    eliminationOrder: null,
     influence: [
       { status: 'face-down', kind: c1 },
       { status: 'face-down', kind: c2 },

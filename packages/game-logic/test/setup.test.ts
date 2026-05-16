@@ -46,10 +46,11 @@ describe('dealInitialState', () => {
         }
       })
 
-      it('marks every player alive and connected', () => {
+      it('marks every player alive, connected, and not yet eliminated', () => {
         for (const seat of state.seats) {
           expect(seat.isAlive).toBe(true)
           expect(seat.isDisconnected).toBe(false)
+          expect(seat.eliminationOrder).toBeNull()
         }
       })
 
@@ -82,9 +83,9 @@ describe('dealInitialState', () => {
     })
   }
 
-  it('rejects fewer than 3 players', () => {
-    expect(() => dealInitialState('m1', makePlayers(2))).toThrow()
-    expect(() => dealInitialState('m1', makePlayers(1))).toThrow()
+  // MIN_PLAYERS-relative so it survives the TEMP(2-player testing) change.
+  it('rejects fewer than MIN_PLAYERS', () => {
+    expect(() => dealInitialState('m1', makePlayers(MIN_PLAYERS - 1))).toThrow()
     expect(() => dealInitialState('m1', [])).toThrow()
   })
 

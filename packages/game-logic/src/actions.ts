@@ -217,6 +217,15 @@ function findNextLivingSeat(state: GameState, fromIndex: number): number {
   return fromIndex
 }
 
+// The 1-based ordinal to stamp on the NEXT seat to be eliminated: one more than
+// the count of seats already carrying an eliminationOrder. Call it before
+// assigning `seat.eliminationOrder` (the about-to-die seat is still null, so it
+// is not counted). Two seats eliminated in the same influence-loss chain get
+// distinct, monotonically increasing values — each elimination calls this once.
+export function nextEliminationOrder(state: GameState): number {
+  return state.seats.filter((s) => s.eliminationOrder != null).length + 1
+}
+
 // SKILL.md § 3.2 phase 8 + § 4.8 — TURN_END handling. Win-condition check; if
 // game over, GAME_OVER; otherwise advance to next living seat. Clears ALL
 // pending state defensively.
@@ -424,6 +433,8 @@ export function applyInfluencePick(
   seat.influence[cardIndex] = { status: 'revealed', kind: card.kind }
   if (seat.influence.every((inf) => inf.status === 'revealed')) {
     seat.isAlive = false
+    // Stamp the finishing order once, at the elimination moment. SKILL.md § 4.8.
+    seat.eliminationOrder = nextEliminationOrder(state)
   }
   // Consume this entry.
   state.influenceLossQueue.shift()

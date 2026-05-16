@@ -1,6 +1,20 @@
 'use client'
 
 import { useState } from 'react'
+import { MailCheck } from 'lucide-react'
+import { Logo } from '@/components/logo'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
 import { authClient } from '@/lib/auth-client'
 
 // Sign-in UI. SKILL.md § 5 / § 6 — three providers (Google, Discord, magic
@@ -51,66 +65,83 @@ export default function SignInPage() {
   }
 
   return (
-    <main className="mx-auto max-w-md p-8">
-      <h1 className="mb-4 text-3xl font-semibold">Sign in to Coup Online</h1>
-      <p className="mb-6 text-sm text-gray-500">
-        Sign in to play. We store only your provider name, email, avatar, and
-        your match history.
-      </p>
+    <main className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-6 p-6">
+      <header className="flex flex-col items-center gap-3 text-center">
+        <Logo size="lg" />
+        <div className="h-px w-24 bg-gold/60" />
+      </header>
 
-      <button
-        type="button"
-        onClick={() => void handleSocial('google')}
-        disabled={busy}
-        className="mb-3 w-full rounded bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:bg-gray-300"
-      >
-        Continue with Google
-      </button>
-
-      <button
-        type="button"
-        onClick={() => void handleSocial('discord')}
-        disabled={busy}
-        className="mb-6 w-full rounded bg-indigo-600 p-2 text-white hover:bg-indigo-700 disabled:bg-gray-300"
-      >
-        Continue with Discord
-      </button>
-
-      <div className="my-4 flex items-center gap-3 text-xs text-gray-400">
-        <span className="h-px flex-1 bg-gray-200" /> or by email{' '}
-        <span className="h-px flex-1 bg-gray-200" />
-      </div>
-
-      {sent ? (
-        <p className="rounded border border-green-300 bg-green-50 p-3 text-sm text-green-800">
-          Check your inbox for a sign-in link. It expires in a few minutes and
-          only works once.
-        </p>
-      ) : (
-        <form onSubmit={handleMagicLink} className="space-y-2">
-          <input
-            name="email"
-            type="email"
-            required
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="block w-full rounded border border-gray-300 p-2"
-          />
-          <button
-            type="submit"
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-display text-lg tracking-wide">Sign in</CardTitle>
+          <CardDescription>
+            Sign in to play. We store only your provider name, email, avatar,
+            and your match history.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            onClick={() => void handleSocial('google')}
             disabled={busy}
-            className="w-full rounded bg-green-600 p-2 text-white hover:bg-green-700 disabled:bg-gray-300"
           >
-            Send magic link
-          </button>
-        </form>
-      )}
+            Continue with Google
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            onClick={() => void handleSocial('discord')}
+            disabled={busy}
+          >
+            Continue with Discord
+          </Button>
+
+          <div className="flex items-center gap-3">
+            <Separator className="flex-1" />
+            <span className="text-xs tracking-widest text-muted-foreground uppercase">
+              or by email
+            </span>
+            <Separator className="flex-1" />
+          </div>
+
+          {sent ? (
+            <Alert>
+              <MailCheck />
+              <AlertTitle>Check your inbox</AlertTitle>
+              <AlertDescription>
+                We sent a sign-in link to your email. It expires in a few
+                minutes and only works once.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <form onSubmit={handleMagicLink} className="flex flex-col gap-2">
+              <Label htmlFor="email" className="sr-only">
+                Email
+              </Label>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                required
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <Button type="submit" size="lg" disabled={busy}>
+                Send magic link
+              </Button>
+            </form>
+          )}
+        </CardContent>
+      </Card>
 
       {error && (
-        <p className="mt-4 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-700">
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
     </main>
   )

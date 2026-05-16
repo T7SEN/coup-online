@@ -43,7 +43,9 @@ const TIMER_MS = 15_000
 // SKILL.md § 3.5 — disconnected players forfeit 30 s after their last WS closes.
 const FORFEIT_MS = 30_000
 
-const MIN_PLAYERS_TO_START = 3
+// TEMP(2-player testing): spec is 3 (SKILL.md § 1) — lowered to 2 for local
+// testing so the host can start a 2-player match. Revert to 3 before release.
+const MIN_PLAYERS_TO_START = 2
 const MAX_PLAYERS = 6
 
 // Close codes (RFC 6455 4000-4999 = application-specific).

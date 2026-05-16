@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { Copy } from 'lucide-react'
+import { toast } from 'sonner'
 import type {
   Action,
   BlockerCharacter,
@@ -9,6 +11,20 @@ import type {
   PlayerView,
   ServerMessage,
 } from '@coup-online/protocol'
+import { Logo } from '@/components/logo'
+import { SeatCard } from '@/components/seat-card'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { GAME_SERVER_WS } from '@/lib/config'
 import { logger } from '@/lib/logger'
 import { useIsClient } from '@/lib/use-is-client'
@@ -38,6 +54,22 @@ interface OverState {
 }
 type UiState = LobbyState | GameStateUi | OverState | null
 
+// SCREAMING_SNAKE phase → human label, e.g. CHALLENGE_WINDOW → "Challenge window".
+function prettyPhase(phase: PlayerView['phase']): string {
+  const lower = phase.toLowerCase().replace(/_/g, ' ')
+  return lower.charAt(0).toUpperCase() + lower.slice(1)
+}
+
+// Full-viewport centered shell for the loading / error / no-token screens.
+function CenteredShell({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="mx-auto flex min-h-svh max-w-md flex-col items-center justify-center gap-5 p-6 text-center">
+      <Logo size="md" />
+      {children}
+    </main>
+  )
+}
+
 export function RoomClient({
   matchId,
   myPlayerId,
@@ -61,11 +93,6 @@ export function RoomClient({
   // Fatal errors (non-recoverable connection close, missing token, etc.).
   // These replace the page with a "Back to lobby" affordance.
   const [error, setError] = useState<string | null>(null)
-  // Transient server `error` messages (insufficient_coins, not_your_turn, …).
-  // These show as an inline banner that auto-dismisses; the game UI stays
-  // visible. Auto-clear keeps the most recent issue visible without piling up.
-  const [transientError, setTransientError] = useState<string | null>(null)
-  const transientTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [connStatus, setConnStatus] = useState<ConnectionState>('connecting')
   // Exchange-pick: 4 cards arrive via a private `prompt` message addressed to
@@ -103,14 +130,9 @@ export function RoomClient({
             break
           case 'error':
             // Server-sent action error. Transient — the game continues, this
-            // is just feedback. Auto-dismiss after 4 s so a fresh action isn't
-            // shadowed by stale text.
-            setTransientError(`${msg.code}: ${msg.message}`)
-            if (transientTimerRef.current) clearTimeout(transientTimerRef.current)
-            transientTimerRef.current = setTimeout(() => {
-              setTransientError(null)
-              transientTimerRef.current = null
-            }, 4_000)
+            // is just feedback. A sonner toast auto-dismisses without shifting
+            // the layout.
+            toast.error(msg.message)
             break
           case 'rate-limit':
             logger.warn('rate limited by server', {
@@ -162,10 +184,6 @@ export function RoomClient({
 
     return () => {
       clearInterval(tick)
-      if (transientTimerRef.current) {
-        clearTimeout(transientTimerRef.current)
-        transientTimerRef.current = null
-      }
       ws.close()
     }
   }, [matchId, token])
@@ -175,83 +193,90 @@ export function RoomClient({
   // SSR + initial client render share this stable placeholder so hydration
   // doesn't mismatch.
   if (!isClient) {
-    return <main className="mx-auto max-w-2xl p-8">Connecting…</main>
+    return (
+      <CenteredShell>
+        <p className="text-sm text-muted-foreground">Connecting…</p>
+      </CenteredShell>
+    )
   }
 
   if (!token) {
     return (
-      <main className="mx-auto max-w-2xl p-8">
-        <p className="rounded border border-yellow-300 bg-yellow-50 p-3 text-yellow-800">
-          No token in this tab. Go back to the lobby to create or join a match.
-        </p>
-        <Link href="/" className="mt-4 inline-block text-blue-600 underline">
-          Back to lobby
-        </Link>
-      </main>
+      <CenteredShell>
+        <Alert>
+          <AlertTitle>No token in this tab</AlertTitle>
+          <AlertDescription>
+            Go back to the lobby to create or join a match.
+          </AlertDescription>
+        </Alert>
+        <Button asChild variant="outline">
+          <Link href="/">Back to lobby</Link>
+        </Button>
+      </CenteredShell>
     )
   }
 
   if (error) {
     return (
-      <main className="mx-auto max-w-2xl p-8">
-        <p className="rounded border border-red-300 bg-red-50 p-3 text-red-700">{error}</p>
-        <Link href="/" className="mt-4 inline-block text-blue-600 underline">
-          Back to lobby
-        </Link>
-      </main>
+      <CenteredShell>
+        <Alert variant="destructive">
+          <AlertTitle>Disconnected</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+        <Button asChild variant="outline">
+          <Link href="/">Back to lobby</Link>
+        </Button>
+      </CenteredShell>
     )
   }
   if (!state) {
     return (
-      <main className="mx-auto max-w-2xl p-8">
-        {connStatus === 'reconnecting' ? 'Reconnecting…' : 'Connecting…'}
-      </main>
+      <CenteredShell>
+        <p className="text-sm text-muted-foreground">
+          {connStatus === 'reconnecting' ? 'Reconnecting…' : 'Connecting…'}
+        </p>
+      </CenteredShell>
     )
   }
 
-  return (
-    <main className="mx-auto max-w-3xl p-8">
-      {connStatus !== 'open' && (
-        <p className="mb-4 rounded border border-yellow-300 bg-yellow-50 p-2 text-sm text-yellow-800">
-          {connStatus === 'reconnecting' ? 'Reconnecting…' : 'Connecting…'}
-        </p>
-      )}
+  const copyJoinLink = () => {
+    // Copy the full URL so the recipient can click straight into the match.
+    // window.location.origin picks up the scheme (http in dev, https in prod).
+    const link = `${window.location.origin}/room/${encodeURIComponent(matchId)}`
+    void window.navigator.clipboard.writeText(link)
+    toast.success('Join link copied to clipboard')
+  }
 
-      {transientError && (
-        <div className="mb-4 flex items-start justify-between gap-3 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-700">
-          <span>{transientError}</span>
-          <button
-            onClick={() => setTransientError(null)}
-            className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700 hover:bg-red-200"
-          >
-            dismiss
-          </button>
+  return (
+    <main className="mx-auto w-full max-w-3xl p-4 sm:p-6">
+      <header className="mb-4 flex items-center justify-between">
+        <Logo size="sm" />
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/">Leave</Link>
+        </Button>
+      </header>
+
+      {connStatus !== 'open' && (
+        <div className="mb-4 rounded-md border border-gold/45 bg-gold/10 px-3 py-1.5 text-sm text-gold-foreground">
+          {connStatus === 'reconnecting' ? 'Reconnecting…' : 'Connecting…'}
         </div>
       )}
 
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Match</h1>
-        <Link href="/" className="text-sm text-blue-600 underline">
-          Leave
-        </Link>
+      <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border bg-card/70 px-3 py-2">
+        <span className="flex min-w-0 items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Match code</span>
+          <span
+            dir="ltr"
+            className="truncate rounded bg-secondary px-2 py-0.5 font-mono tracking-[0.15em] text-secondary-foreground"
+          >
+            {matchId}
+          </span>
+        </span>
+        <Button variant="outline" size="sm" onClick={copyJoinLink}>
+          <Copy />
+          Copy link
+        </Button>
       </div>
-
-      <p className="mb-4 break-all rounded bg-gray-100 p-2 text-xs">
-        <span className="font-medium">Code:</span> {matchId}{' '}
-        <button
-          onClick={() => {
-            // Copy the full URL so the recipient can click straight into the
-            // match. window.location.origin picks up the scheme (http: in dev,
-            // https: in production).
-            const url = `${window.location.origin}/room/${encodeURIComponent(matchId)}`
-            void window.navigator.clipboard.writeText(url)
-          }}
-          className="ml-2 rounded bg-gray-300 px-2 py-0.5 hover:bg-gray-400"
-          title="Copy the full join URL"
-        >
-          copy link
-        </button>
-      </p>
 
       {state.kind === 'lobby' && (
         <LobbyPanel state={state} myPlayerId={myPlayerId} send={send} />
@@ -264,7 +289,9 @@ export function RoomClient({
           exchangeCards={exchangeCards}
         />
       )}
-      {state.kind === 'over' && <OverPanel winnerPlayerId={state.winnerPlayerId} view={state.view} />}
+      {state.kind === 'over' && (
+        <OverPanel winnerPlayerId={state.winnerPlayerId} view={state.view} />
+      )}
     </main>
   )
 }
@@ -290,62 +317,75 @@ function LobbyPanel({
   } else {
     statusLine = 'Lobby full. Ready to start.'
   }
-  let startTooltip: string
-  if (!iAmHost) {
-    startTooltip = 'Only the host can start the match.'
-  } else if (!state.canStart) {
-    startTooltip = `Need at least ${state.minPlayersToStart} players (currently ${count}).`
-  } else {
-    startTooltip = 'Start the match for the current lobby.'
-  }
   return (
-    <section className="space-y-3">
-      <h2 className="text-lg">{statusLine}</h2>
-      <ul className="space-y-1">
-        {state.players.map((p) => {
-          const isHost = p.playerId === state.hostPlayerId
-          const isMe = p.playerId === myPlayerId
-          return (
-            <li
-              key={p.playerId}
-              className="flex items-center justify-between rounded bg-gray-50 p-2 text-sm"
-            >
-              <span dir="auto">
-                {p.displayName}
-                {isMe && <span className="ml-1 text-xs text-gray-500">(you)</span>}
-                {isHost && (
-                  <span className="ml-2 rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
-                    host
+    <Card>
+      <CardContent className="flex flex-col gap-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="font-display text-lg tracking-wide">Lobby</h2>
+          <span className="text-sm text-muted-foreground">
+            {count}/{state.maxPlayers} players
+          </span>
+        </div>
+
+        <p className="text-sm text-muted-foreground">{statusLine}</p>
+
+        <ul className="flex flex-col gap-1.5">
+          {state.players.map((p) => {
+            const isHost = p.playerId === state.hostPlayerId
+            const isMe = p.playerId === myPlayerId
+            return (
+              <li
+                key={p.playerId}
+                className="flex items-center justify-between gap-2 rounded-md border bg-card px-3 py-2 text-sm"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span dir="auto" className="truncate font-medium">
+                    {p.displayName}
                   </span>
+                  {isMe && (
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      (you)
+                    </span>
+                  )}
+                  {isHost && (
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-gold/50 text-gold-foreground"
+                    >
+                      host
+                    </Badge>
+                  )}
+                </span>
+                {iAmHost && !isMe && (
+                  <Button
+                    variant="destructive"
+                    size="xs"
+                    onClick={() => send({ type: 'kick', playerId: p.playerId })}
+                  >
+                    Kick
+                  </Button>
                 )}
-              </span>
-              {iAmHost && !isMe && (
-                <button
-                  onClick={() => send({ type: 'kick', playerId: p.playerId })}
-                  className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700 hover:bg-red-200"
-                  title={`Remove ${p.displayName} from the lobby`}
-                >
-                  kick
-                </button>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-      <button
-        onClick={() => send({ type: 'start-game' })}
-        disabled={!iAmHost || !state.canStart}
-        title={startTooltip}
-        className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:bg-gray-300"
-      >
-        Start game ({count}/{state.maxPlayers})
-      </button>
-      <p className="text-xs text-gray-500">
-        {iAmHost
-          ? `You are the host. Press Start when ${state.minPlayersToStart}–${state.maxPlayers} players are joined.`
-          : 'Waiting for the host to start the match.'}
-      </p>
-    </section>
+              </li>
+            )
+          })}
+        </ul>
+
+        <Button
+          variant="success"
+          size="lg"
+          className="w-full"
+          onClick={() => send({ type: 'start-game' })}
+          disabled={!iAmHost || !state.canStart}
+        >
+          Start game ({count}/{state.maxPlayers})
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          {iAmHost
+            ? `You are the host. Press Start when ${state.minPlayersToStart}–${state.maxPlayers} players have joined.`
+            : 'Waiting for the host to start the match.'}
+        </p>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -362,89 +402,83 @@ function GamePanel({
 }) {
   const me = view.seats.find((s) => s.isMe)
   const isMyTurn = view.turnPlayerId === view.myPlayerId
+  // Eliminated-but-still-connected: the player keeps watching with the same
+  // public-info view (SKILL.md § 1) — we just suppress the action bars and
+  // show a spectator notice so a dead player isn't staring at dead buttons.
+  const amSpectating = me != null && !me.isAlive
   const timerSeconds =
     view.timerEndsAt != null ? Math.max(0, Math.ceil((view.timerEndsAt - now) / 1000)) : null
+  const turnName =
+    view.seats.find((s) => s.playerId === view.turnPlayerId)?.displayName ?? '—'
 
   return (
-    <section>
-      <div className="mb-4 rounded border border-gray-200 p-3">
-        <div className="text-sm">
-          <span className="font-medium">Phase:</span> {view.phase}
-          {timerSeconds != null && <span className="ml-2 text-gray-500">({timerSeconds}s)</span>}
-        </div>
-        <div className="text-sm">
-          <span className="font-medium">Turn:</span>{' '}
-          {view.seats.find((s) => s.playerId === view.turnPlayerId)?.displayName ?? '—'}
-        </div>
-        <div className="text-sm">
-          <span className="font-medium">Court deck:</span> {view.courtDeck.count} cards
-        </div>
-        {view.pendingAction && <PendingActionLine view={view} pa={view.pendingAction} />}
-        {view.pendingBlock && (
-          <div className="text-sm">
-            <span className="font-medium">Block claim:</span>{' '}
-            {view.seats.find((s) => s.playerId === view.pendingBlock!.blockerPlayerId)?.displayName}{' '}
-            → {view.pendingBlock.claimedCharacter}
-          </div>
-        )}
-      </div>
+    <section className="flex flex-col gap-4">
+      {amSpectating && (
+        <Alert>
+          <AlertTitle>You&rsquo;ve been eliminated</AlertTitle>
+          <AlertDescription>
+            You&rsquo;re now spectating. The match continues for the remaining
+            players.
+          </AlertDescription>
+        </Alert>
+      )}
 
-      <div className="mb-6 grid gap-2 sm:grid-cols-2">
-        {view.seats.map((seat) => (
-          <div
-            key={seat.playerId}
-            className={`rounded border p-3 text-sm ${
-              seat.playerId === view.turnPlayerId
-                ? 'border-blue-500 bg-blue-50'
-                : 'border-gray-200'
-            } ${!seat.isAlive ? 'opacity-50' : ''}`}
-          >
-            <div className="flex items-center justify-between">
-              <span dir="auto" className="font-medium">
-                {seat.displayName} {seat.isMe && <span className="text-xs text-gray-500">(you)</span>}
-              </span>
-              <span className="text-xs">
-                {seat.coins} coin{seat.coins === 1 ? '' : 's'}
-              </span>
-            </div>
-            <div className="mt-1 flex gap-1">
-              {seat.influence.map((inf, i) => (
-                <span
-                  key={i}
-                  className={`rounded px-2 py-0.5 text-xs ${
-                    inf.status === 'revealed'
-                      ? 'bg-red-100 text-red-800 line-through'
-                      : inf.status === 'face-down'
-                        ? 'bg-gray-200'
-                        : 'bg-gray-400 text-white'
-                  }`}
-                >
-                  {inf.status === 'hidden' ? '???' : inf.kind}
-                </span>
-              ))}
-              {seat.isDisconnected && (
-                <span className="ml-1 rounded bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">
-                  disconnected
-                </span>
-              )}
-              {!seat.isAlive && (
-                <span className="ml-1 rounded bg-red-200 px-2 py-0.5 text-xs">eliminated</span>
-              )}
-            </div>
+      <Card>
+        <CardContent className="flex flex-col gap-1.5 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">Phase</span>
+            <span className="font-display tracking-wide">{prettyPhase(view.phase)}</span>
+            {timerSeconds != null && (
+              <Badge variant={timerSeconds <= 5 ? 'destructive' : 'secondary'}>
+                {timerSeconds}s
+              </Badge>
+            )}
           </div>
+          <div>
+            <span className="text-muted-foreground">Turn</span>{' '}
+            <span dir="auto" className="font-medium">
+              {turnName}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Court deck</span>{' '}
+            {view.courtDeck.count} card{view.courtDeck.count === 1 ? '' : 's'}
+          </div>
+          {view.pendingAction && <PendingActionLine view={view} pa={view.pendingAction} />}
+          {view.pendingBlock && (
+            <div>
+              <span className="text-muted-foreground">Block claim</span>{' '}
+              <span dir="auto">
+                {
+                  view.seats.find((s) => s.playerId === view.pendingBlock!.blockerPlayerId)
+                    ?.displayName
+                }
+              </span>{' '}
+              → {view.pendingBlock.claimedCharacter}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-2.5 sm:grid-cols-2">
+        {view.seats.map((seat) => (
+          <SeatCard
+            key={seat.playerId}
+            seat={seat}
+            isTurn={seat.playerId === view.turnPlayerId}
+          />
         ))}
       </div>
 
       {/* Action / challenge / block bars are gated by phase + role here so the
           server rarely sees an action it has to reject. Server is still
           authoritative — these gates exist to reduce error-toast noise. */}
-      {view.phase === 'AWAITING_ACTION' && me && (
+      {view.phase === 'AWAITING_ACTION' && me?.isAlive && (
         <ActionBar view={view} me={me} isMyTurn={isMyTurn} send={send} />
       )}
 
-      {(view.phase === 'CHALLENGE_WINDOW' || view.phase === 'BLOCK_CHALLENGE_WINDOW') && me?.isAlive && (
-        <ChallengeBar view={view} send={send} />
-      )}
+      {(view.phase === 'CHALLENGE_WINDOW' || view.phase === 'BLOCK_CHALLENGE_WINDOW') &&
+        me?.isAlive && <ChallengeBar view={view} send={send} />}
 
       {view.phase === 'BLOCK_WINDOW' && me?.isAlive && (
         <BlockBar view={view} send={send} />
@@ -458,12 +492,11 @@ function GamePanel({
         <ExchangeBar cards={exchangeCards} send={send} />
       )}
       {view.phase === 'EXCHANGE_SELECTION' && isMyTurn && !exchangeCards && (
-        <p className="text-sm text-gray-500">Waiting for exchange prompt…</p>
+        <p className="text-sm text-muted-foreground">Waiting for exchange prompt…</p>
       )}
       {view.phase === 'EXCHANGE_SELECTION' && !isMyTurn && (
-        <p className="text-sm text-gray-500">
-          {view.seats.find((s) => s.playerId === view.turnPlayerId)?.displayName ?? '?'} is
-          picking exchange cards…
+        <p className="text-sm text-muted-foreground">
+          <span dir="auto">{turnName}</span> is picking exchange cards…
         </p>
       )}
     </section>
@@ -484,30 +517,45 @@ function PendingActionLine({
     ? (view.seats.find((s) => s.playerId === targetId)?.displayName ?? '?')
     : null
   return (
-    <div className="text-sm">
-      <span className="font-medium">Pending:</span> {actor} → {action.kind}
-      {targetName && ` (target: ${targetName})`}
+    <div>
+      <span className="text-muted-foreground">Pending</span>{' '}
+      <span dir="auto">{actor}</span> → {action.kind}
+      {targetName && (
+        <>
+          {' '}
+          (target: <span dir="auto">{targetName}</span>)
+        </>
+      )}
     </div>
   )
 }
+
+type ButtonVariant = React.ComponentProps<typeof Button>['variant']
 
 interface AffordedButtonProps {
   readonly label: string
   readonly disabledReason: string | null
   readonly onClick: () => void
-  readonly className: string
+  readonly variant?: ButtonVariant
 }
 
-function AffordedButton({ label, disabledReason, onClick, className }: AffordedButtonProps) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabledReason !== null}
-      title={disabledReason ?? undefined}
-      className={`${className} disabled:opacity-50 disabled:cursor-not-allowed`}
-    >
+// A button that, when disabled, explains why via a Radix tooltip. A disabled
+// <button> emits no pointer events, so the tooltip hangs off a <span> wrapper.
+function AffordedButton({ label, disabledReason, onClick, variant = 'secondary' }: AffordedButtonProps) {
+  const disabled = disabledReason !== null
+  const button = (
+    <Button variant={variant} size="sm" onClick={onClick} disabled={disabled}>
       {label}
-    </button>
+    </Button>
+  )
+  if (!disabled) return button
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">{button}</span>
+      </TooltipTrigger>
+      <TooltipContent>{disabledReason}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -527,13 +575,13 @@ function ActionBar({
 
   const act = (a: Action) => send({ type: 'action', action: a })
 
+  // ActionBar only renders for a living `me` (gated by the parent), so the
+  // sole turn-gating reason left is "not your turn".
   const turnReason = isMyTurn
-    ? me.isAlive
-      ? null
-      : 'You have been eliminated.'
+    ? null
     : `It is ${view.seats.find((s) => s.playerId === view.turnPlayerId)?.displayName ?? '?'}'s turn.`
   const mustCoupReason = me.coins >= 10 ? '10+ coins — you must Coup.' : null
-  const targetReason = target.length === 0 ? 'Select a target below.' : null
+  const targetReason = target.length === 0 ? 'Select a target first.' : null
   const faceDownCount = me.influence.filter((i) => i.status === 'face-down').length
   const exchangeFaceDownReason =
     faceDownCount === 2 ? null : 'Exchange requires 2 face-down cards (v1 limitation).'
@@ -552,67 +600,63 @@ function ActionBar({
   const stealReason = turnReason ?? mustCoupReason ?? targetReason
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
-        <AffordedButton
-          label="Income (+1)"
-          disabledReason={incomeReason}
-          onClick={() => act({ kind: 'Income' })}
-          className="rounded bg-gray-200 px-3 py-2 text-sm"
-        />
-        <AffordedButton
-          label="Foreign Aid (+2)"
-          disabledReason={fAidReason}
-          onClick={() => act({ kind: 'ForeignAid' })}
-          className="rounded bg-gray-200 px-3 py-2 text-sm"
-        />
-        <AffordedButton
-          label="Tax / Duke (+3)"
-          disabledReason={taxReason}
-          onClick={() => act({ kind: 'Tax' })}
-          className="rounded bg-gray-200 px-3 py-2 text-sm"
-        />
-        <AffordedButton
-          label="Exchange / Ambassador"
-          disabledReason={exchangeReason}
-          onClick={() => act({ kind: 'Exchange' })}
-          className="rounded bg-gray-200 px-3 py-2 text-sm"
-        />
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="text-sm">Target:</label>
-        <select
-          value={target}
-          onChange={(e) => setTarget(e.target.value)}
-          className="rounded border border-gray-300 p-1 text-sm"
-        >
-          <option value="">(none)</option>
-          {aliveOthers.map((s) => (
-            <option key={s.playerId} value={s.playerId}>
-              {s.displayName}
-            </option>
-          ))}
-        </select>
-        <AffordedButton
-          label="Coup (-7)"
-          disabledReason={coupReason}
-          onClick={() => target && act({ kind: 'Coup', targetPlayerId: target })}
-          className="rounded bg-red-700 px-3 py-2 text-sm text-white"
-        />
-        <AffordedButton
-          label="Assassinate (-3) / Assassin"
-          disabledReason={assassinateReason}
-          onClick={() => target && act({ kind: 'Assassinate', targetPlayerId: target })}
-          className="rounded bg-red-500 px-3 py-2 text-sm text-white"
-        />
-        <AffordedButton
-          label="Steal / Captain"
-          disabledReason={stealReason}
-          onClick={() => target && act({ kind: 'Steal', targetPlayerId: target })}
-          className="rounded bg-yellow-500 px-3 py-2 text-sm text-white"
-        />
-      </div>
-    </div>
+    <Card>
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex flex-wrap gap-2">
+          <AffordedButton
+            label="Income +1"
+            disabledReason={incomeReason}
+            onClick={() => act({ kind: 'Income' })}
+          />
+          <AffordedButton
+            label="Foreign Aid +2"
+            disabledReason={fAidReason}
+            onClick={() => act({ kind: 'ForeignAid' })}
+          />
+          <AffordedButton
+            label="Tax +3 · Duke"
+            disabledReason={taxReason}
+            onClick={() => act({ kind: 'Tax' })}
+          />
+          <AffordedButton
+            label="Exchange · Ambassador"
+            disabledReason={exchangeReason}
+            onClick={() => act({ kind: 'Exchange' })}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={target} onValueChange={setTarget}>
+            <SelectTrigger className="min-w-44" aria-label="Target player">
+              <SelectValue placeholder="Choose a target" />
+            </SelectTrigger>
+            <SelectContent>
+              {aliveOthers.map((s) => (
+                <SelectItem key={s.playerId} value={s.playerId}>
+                  {s.displayName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <AffordedButton
+            label="Coup −7"
+            variant="default"
+            disabledReason={coupReason}
+            onClick={() => target && act({ kind: 'Coup', targetPlayerId: target })}
+          />
+          <AffordedButton
+            label="Assassinate −3 · Assassin"
+            variant="destructive"
+            disabledReason={assassinateReason}
+            onClick={() => target && act({ kind: 'Assassinate', targetPlayerId: target })}
+          />
+          <AffordedButton
+            label="Steal · Captain"
+            disabledReason={stealReason}
+            onClick={() => target && act({ kind: 'Steal', targetPlayerId: target })}
+          />
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -628,21 +672,25 @@ function ChallengeBar({
   let reason: string | null = null
   if (view.phase === 'CHALLENGE_WINDOW') {
     if (view.pendingAction?.actorPlayerId === view.myPlayerId) {
-      reason = 'You declared this action — cannot challenge yourself.'
+      reason = 'You declared this action — you cannot challenge yourself.'
     }
   } else {
     // BLOCK_CHALLENGE_WINDOW
     if (view.pendingBlock?.blockerPlayerId === view.myPlayerId) {
-      reason = 'You declared this block — cannot challenge yourself.'
+      reason = 'You declared this block — you cannot challenge yourself.'
     }
   }
   return (
-    <AffordedButton
-      label="Challenge"
-      disabledReason={reason}
-      onClick={() => send({ type: 'challenge' })}
-      className="rounded bg-red-600 px-3 py-2 text-sm text-white"
-    />
+    <Card>
+      <CardContent>
+        <AffordedButton
+          label="Challenge"
+          variant="destructive"
+          disabledReason={reason}
+          onClick={() => send({ type: 'challenge' })}
+        />
+      </CardContent>
+    </Card>
   )
 }
 
@@ -685,17 +733,20 @@ function BlockBar({
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
-      {candidates.map((c) => (
-        <button
-          key={c}
-          onClick={() => send({ type: 'block', claimedCharacter: c })}
-          className="rounded bg-purple-600 px-3 py-2 text-sm text-white"
-        >
-          Block with {c}
-        </button>
-      ))}
-    </div>
+    <Card>
+      <CardContent className="flex flex-wrap gap-2">
+        {candidates.map((c) => (
+          <Button
+            key={c}
+            variant="secondary"
+            size="sm"
+            onClick={() => send({ type: 'block', claimedCharacter: c })}
+          >
+            Block with {c}
+          </Button>
+        ))}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -715,7 +766,9 @@ function InfluenceLossSection({
   }
   const pickerName = view.seats.find((s) => s.playerId === picker)?.displayName ?? '?'
   return (
-    <p className="text-sm text-gray-500">{pickerName} is choosing a card to reveal…</p>
+    <p className="text-sm text-muted-foreground">
+      <span dir="auto">{pickerName}</span> is choosing a card to reveal…
+    </p>
   )
 }
 
@@ -727,22 +780,25 @@ function InfluencePickBar({
   send: (msg: Parameters<WsClient['send']>[0]) => void
 }) {
   return (
-    <div className="space-y-2">
-      <p className="text-sm">Choose a card to reveal:</p>
-      <div className="flex gap-2">
-        {me.influence.map((inf, i) =>
-          inf.status === 'face-down' ? (
-            <button
-              key={i}
-              onClick={() => send({ type: 'influence-pick', cardIndex: i })}
-              className="rounded bg-red-600 px-3 py-2 text-sm text-white"
-            >
-              Reveal {inf.kind}
-            </button>
-          ) : null,
-        )}
-      </div>
-    </div>
+    <Card>
+      <CardContent className="flex flex-col gap-2">
+        <p className="text-sm font-medium">Choose a card to reveal:</p>
+        <div className="flex flex-wrap gap-2">
+          {me.influence.map((inf, i) =>
+            inf.status === 'face-down' ? (
+              <Button
+                key={i}
+                variant="destructive"
+                size="sm"
+                onClick={() => send({ type: 'influence-pick', cardIndex: i })}
+              >
+                Reveal {inf.kind}
+              </Button>
+            ) : null,
+          )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -766,46 +822,114 @@ function ExchangeBar({
     send({ type: 'exchange-pick', keepIndices: [selected[0], selected[1]] })
   }
   return (
-    <div className="space-y-2">
-      <p className="text-sm">
-        Choose 2 cards to keep (the other 2 return to the Court Deck):
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {cards.map((c, i) => (
-          <button
-            key={i}
-            onClick={() => toggle(i)}
-            className={`rounded px-3 py-2 text-sm ${
-              selected.includes(i)
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-200 text-gray-800'
-            }`}
-          >
-            {c}
-          </button>
-        ))}
-      </div>
-      <button
-        onClick={submit}
-        disabled={selected.length !== 2}
-        className="rounded bg-green-600 px-3 py-2 text-sm text-white disabled:opacity-50"
-      >
-        Keep selected ({selected.length}/2)
-      </button>
-    </div>
+    <Card>
+      <CardContent className="flex flex-col gap-3">
+        <p className="text-sm font-medium">
+          Choose 2 cards to keep — the other 2 return to the Court Deck:
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {cards.map((c, i) => (
+            <Button
+              key={i}
+              variant={selected.includes(i) ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => toggle(i)}
+            >
+              {c}
+            </Button>
+          ))}
+        </div>
+        <Button
+          variant="success"
+          size="sm"
+          className="w-fit"
+          onClick={submit}
+          disabled={selected.length !== 2}
+        >
+          Keep selected ({selected.length}/2)
+        </Button>
+      </CardContent>
+    </Card>
   )
+}
+
+// English ordinal: 1 → "1st", 2 → "2nd", 3 → "3rd", 4 → "4th", 11 → "11th"…
+function ordinal(n: number): string {
+  const rem100 = n % 100
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`
+  switch (n % 10) {
+    case 1:
+      return `${n}st`
+    case 2:
+      return `${n}nd`
+    case 3:
+      return `${n}rd`
+    default:
+      return `${n}th`
+  }
 }
 
 function OverPanel({ winnerPlayerId, view }: { winnerPlayerId: string; view: PlayerView }) {
   const winner = view.seats.find((s) => s.playerId === winnerPlayerId)
+  // Final standings: the survivor first, then eliminated players ranked by
+  // reverse elimination order (last eliminated = runner-up). Mirrors the
+  // server's computeFinishingPositions() so the displayed placement matches
+  // the rating update.
+  const standings = [
+    ...view.seats.filter((s) => s.eliminationOrder == null),
+    ...view.seats
+      .filter((s) => s.eliminationOrder != null)
+      .sort((a, b) => (b.eliminationOrder ?? 0) - (a.eliminationOrder ?? 0)),
+  ]
   return (
-    <section>
-      <h2 className="mb-4 text-2xl">
-        {winner?.isMe ? 'You won!' : `${winner?.displayName ?? '?'} won`}
-      </h2>
-      <Link href="/" className="text-blue-600 underline">
-        Play again
-      </Link>
-    </section>
+    <Card>
+      <CardContent className="flex flex-col gap-4">
+        <div className="flex flex-col items-center gap-1 text-center">
+          <span className="text-xs tracking-[0.3em] text-muted-foreground uppercase">
+            Game over
+          </span>
+          <h2 className="font-display text-2xl tracking-wide">
+            {winner?.isMe ? 'You won!' : `${winner?.displayName ?? '?'} won`}
+          </h2>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
+            Final standings
+          </h3>
+          <ol className="flex flex-col gap-1.5">
+            {standings.map((s, i) => (
+              <li
+                key={s.playerId}
+                className={
+                  i === 0
+                    ? 'flex items-center justify-between gap-3 rounded-md border border-gold/55 bg-gold/10 px-3 py-2 text-sm'
+                    : 'flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-sm'
+                }
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="w-5 shrink-0 text-center font-display tabular-nums">
+                    {i + 1}
+                  </span>
+                  <span dir="auto" className="truncate font-medium">
+                    {s.displayName}
+                  </span>
+                  {s.isMe && (
+                    <span className="shrink-0 text-xs text-muted-foreground">(you)</span>
+                  )}
+                </span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {i === 0 ? 'winner' : `${ordinal(i + 1)} place`}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+
+        <Button asChild size="lg" className="w-full">
+          <Link href="/">Play again</Link>
+        </Button>
+      </CardContent>
+    </Card>
   )
 }

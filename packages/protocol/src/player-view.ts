@@ -27,6 +27,11 @@ export const PlayerSeat = z.object({
   isAlive: z.boolean(),
   isDisconnected: z.boolean(),
   influence: z.array(Influence).length(2),
+  // 1-based ordinal of when this seat was eliminated (1 = first out), or null
+  // while alive. Public — elimination is observable to everyone (SKILL.md § 3.1).
+  // The client renders final standings from this; finishing position is the
+  // reverse of elimination order.
+  eliminationOrder: z.number().int().positive().nullable(),
 })
 export type PlayerSeat = z.infer<typeof PlayerSeat>
 
@@ -54,7 +59,9 @@ export const PlayerView = z.object({
   myPlayerId: PlayerId,
   phase: Phase,
   turnPlayerId: PlayerId,
-  seats: z.array(PlayerSeat).min(3).max(6),
+  // TEMP(2-player testing): min lowered 3 → 2 so a 2-seat game's state-update
+  // passes validation. Revert to .min(3) before release (SKILL.md § 1).
+  seats: z.array(PlayerSeat).min(2).max(6),
   courtDeck: z.object({ count: z.number().int().nonnegative() }),
   pendingAction: PendingAction.nullable(),
   pendingBlock: PendingBlock.nullable(),

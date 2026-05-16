@@ -17,6 +17,7 @@ function makeTestState(): GameState {
         coins: 2,
         isAlive: true,
         isDisconnected: false,
+        eliminationOrder: null,
         influence: [
           { status: 'face-down', kind: 'Duke' },
           { status: 'face-down', kind: 'Assassin' },
@@ -28,6 +29,7 @@ function makeTestState(): GameState {
         coins: 5,
         isAlive: true,
         isDisconnected: false,
+        eliminationOrder: null,
         influence: [
           { status: 'face-down', kind: 'Captain' },
           { status: 'face-down', kind: 'Ambassador' },
@@ -39,6 +41,7 @@ function makeTestState(): GameState {
         coins: 0,
         isAlive: true,
         isDisconnected: true,
+        eliminationOrder: null,
         influence: [
           { status: 'face-down', kind: 'Contessa' },
           { status: 'revealed', kind: 'Duke' }, // Charlie lost one
@@ -95,6 +98,14 @@ describe('buildPlayerView — basic structure', () => {
     expect(buildPlayerView(makeTestState(), 'p0').timerEndsAt).toBeNull()
     const withTimer = { ...makeTestState(), timerEndsAt: 1_700_000_000_000 }
     expect(buildPlayerView(withTimer, 'p0').timerEndsAt).toBe(1_700_000_000_000)
+  })
+
+  it('passes through eliminationOrder (null while alive, ordinal once out)', () => {
+    expect(buildPlayerView(makeTestState(), 'p0').seats[0].eliminationOrder).toBeNull()
+    const state = makeTestState()
+    state.seats[2].isAlive = false
+    state.seats[2].eliminationOrder = 1
+    expect(buildPlayerView(state, 'p0').seats[2].eliminationOrder).toBe(1)
   })
 })
 

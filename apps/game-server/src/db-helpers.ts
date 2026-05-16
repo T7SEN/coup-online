@@ -6,7 +6,7 @@ import {
   type NewMatchPlayer,
   type NewMmrHistory,
 } from '@coup-online/db'
-import type { GameState } from '@coup-online/game-logic'
+import { computeFinishingPositions, type GameState } from '@coup-online/game-logic'
 import { rateMatch, type SeatResult } from '@coup-online/rating'
 import { inArray } from 'drizzle-orm'
 
@@ -29,10 +29,10 @@ export interface PlayerMeta {
 //      Better Auth has already created the row at sign-in. We surface a clear
 //      error if the invariant is somehow broken (FK violation otherwise).
 //   2. Snapshot pre-match mu/sigma from those rows.
-//   3. Build SeatResult[] from the final GameState. v1 ranks the winner as
-//      finishingPosition=1 and everyone else as 2 (TrueSkill handles tied
-//      ranks). True elimination order needs a per-seat `eliminatedAtTurn`
-//      field — future pass; not yet tracked.
+//   3. Build SeatResult[] from the final GameState. computeFinishingPositions()
+//      derives each seat's 1-based finishing position from its eliminationOrder
+//      (reverse elimination order — last eliminated places highest), so
+//      TrueSkill sees the true N-way ranking instead of winner=1 / rest tied.
 //   4. Call rateMatch() → RatingDelta[].
 //   5. db.batch() one match + N match_player + N mmr_history + N user-updates,
 //      atomic per insertMatchResult.
@@ -71,6 +71,17 @@ export async function persistMatchResult(
     throw new Error('persistMatchResult: no alive seat at GAME_OVER')
   }
 
+  // True N-way ranking from elimination order (SKILL.md § 3.6 / § 4.8).
+  const positions = computeFinishingPositions(finalState)
+  const finishingPositionOf = (playerId: string): number => {
+    const position = positions.get(playerId)
+    if (position === undefined) {
+      // Defensive — computeFinishingPositions covers every seat.
+      throw new Error(`persistMatchResult: no finishing position for "${playerId}"`)
+    }
+    return position
+  }
+
   const seatResults: SeatResult[] = finalState.seats.map((seat) => {
     const rating = ratingByUserId.get(seat.playerId)
     if (!rating) {
@@ -81,7 +92,7 @@ export async function persistMatchResult(
       playerId: seat.playerId,
       mu: rating.mu,
       sigma: rating.sigma,
-      finishingPosition: seat.playerId === winner.playerId ? 1 : 2,
+      finishingPosition: finishingPositionOf(seat.playerId),
     }
   })
 
@@ -106,7 +117,7 @@ export async function persistMatchResult(
       matchId,
       userId: seat.playerId,
       seat: i,
-      finishingPosition: seat.playerId === winner.playerId ? 1 : 2,
+      finishingPosition: finishingPositionOf(seat.playerId),
       muBefore: delta.muBefore,
       sigmaBefore: delta.sigmaBefore,
       muAfter: delta.muAfter,

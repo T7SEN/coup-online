@@ -27,6 +27,12 @@ export interface ServerSeat {
   isAlive: boolean
   isDisconnected: boolean
   influence: ServerInfluence[] // length 2 at start; cards flip face-up when lost
+  // 1-based ordinal of the seat's elimination: the first player knocked out is
+  // 1, the second 2, etc. `null` while the seat is still alive. Assigned exactly
+  // once, at the moment the seat goes !isAlive (applyInfluencePick / forfeitPlayer).
+  // Drives true finishing-position ranking for TrueSkill — see
+  // computeFinishingPositions() in win-condition.ts.
+  eliminationOrder: number | null
 }
 
 // Re-export the BlockerCharacter type for convenience — pending-block uses it

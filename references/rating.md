@@ -87,19 +87,20 @@ number stabilizes near the player's true skill.
 ## Usage pattern
 
 ```ts
-import { rateMatch, conservativeRating } from '@coup-online/rating'
+import { rateMatch } from '@coup-online/rating'
+import { computeFinishingPositions } from '@coup-online/game-logic'
 
-// Inside the GameRoom DO's endGame() — LAST step per SKILL.md § 5
-async function endGame(state: GameState) {
-  // 1. Determine finishing positions from elimination order.
-  const seats = computeFinishingOrder(state)  // implementation-specific
-  // 2. Pull pre-match mu/sigma from D1 (already loaded at game start).
-  // 3. Compute deltas.
-  const deltas = rateMatch(seats)
-  // 4. Persist: matches row, match_players rows, mmr_history rows,
-  //    then update users.mu / users.sigma. All in one D1 transaction.
-  await persistMatchResult(deltas)
-}
+// apps/game-server/src/db-helpers.ts — persistMatchResult() runs as the LAST
+// step of the GameRoom DO's game-end handling (SKILL.md § 5).
+//
+// 1. computeFinishingPositions(finalState) → Map<playerId, position>. Position
+//    is derived from each seat's `eliminationOrder` (reverse elimination order
+//    — see the next section); the lone survivor is 1st.
+// 2. Snapshot pre-match mu/sigma from the players' `user` rows in D1.
+// 3. rateMatch(seatResults) → RatingDelta[]. Each SeatResult carries mu, sigma,
+//    and the finishing position from step 1.
+// 4. One db.batch(): the match row + N match_player rows + N mmr_history rows
+//    + N user mu/sigma updates — atomic.
 ```
 
 For the leaderboard query:
@@ -121,6 +122,26 @@ Reason: 1-indexed "finishingPosition" matches user expectations (1st, 2nd,
 3rd) and matches the `finishing_position` column in the planned `match_players`
 D1 table. Callers and persistence layers don't have to think about TrueSkill's
 internal convention.
+
+## How finishing position is determined
+
+`finishingPosition` is **not** stored as a field — it's derived at game end from
+elimination order, which lives in game-logic.
+
+Each `ServerSeat` carries `eliminationOrder: number | null`: `null` while the
+seat is alive, and a 1-based ordinal stamped exactly once at the moment the seat
+is eliminated (1 = first player knocked out). Both elimination paths set it via
+`nextEliminationOrder(state)` — `applyInfluencePick` (lost the last influence)
+and `forfeitPlayer` (disconnect forfeit). Two seats knocked out in the same
+influence-loss chain get distinct, consecutive ordinals.
+
+`computeFinishingPositions(state)` (`packages/game-logic/src/win-condition.ts`)
+inverts that into finishing positions: the lone survivor places 1st, then the
+eliminated seats are ranked by `eliminationOrder` **descending** — the last
+player eliminated is the runner-up. A finished N-player match therefore yields
+the distinct positions `1..N`, which `persistMatchResult` feeds straight into
+`rateMatch`. TrueSkill sees the true N-way ranking instead of the old
+winner=1 / everyone-else-tied-2 approximation.
 
 ## Behavior verified by tests (`packages/rating/test/`)
 
@@ -172,6 +193,7 @@ native binaries — Workers-safe.
 
 - **Canonical spec:** [`SKILL.md`](../SKILL.md) § 3.6 (TrueSkill + Match Persistence), § 2 (TrueSkill in the locked stack)
 - **Where rating fits in the action lifecycle:** [`state-machine.md`](./state-machine.md) — the post-`GAME_OVER` flow (after `checkWinner` returns a winner, the DO's endGame() is called)
+- **Finishing-position derivation:** `computeFinishingPositions` in `packages/game-logic/src/win-condition.ts` (tested in `win-condition.test.ts`)
 - **Why TrueSkill is the only legal pick (no Elo / Glicko-2):** [`anti-hallucination.md`](./anti-hallucination.md) — Rating section
 - **The "MMR write is the last step of endGame()" rule:** [`coding-patterns.md`](./coding-patterns.md) § 16; [`SKILL.md`](../SKILL.md) § 5
 - **Persistence target (D1 tables: `users`, `match_players`, `mmr_history`):** planned `references/db-schema.md` + `packages/db/` (not yet implemented)

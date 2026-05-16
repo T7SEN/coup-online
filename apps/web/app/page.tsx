@@ -2,7 +2,15 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { authClient, signOut, useSession } from '@/lib/auth-client'
+import { Logo } from '@/components/logo'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
+import { signOut, useSession } from '@/lib/auth-client'
 import { generateMatchCode, parseMatchCode } from '@/lib/match-code'
 
 // Lobby page. SKILL.md § 1 — no guest play; redirect to /auth/signin if
@@ -81,21 +89,28 @@ export default function Lobby() {
   }
 
   if (isPending) {
-    return <main className="mx-auto max-w-md p-8">Loading…</main>
+    return (
+      <main className="mx-auto flex min-h-svh max-w-md flex-col items-center justify-center gap-4 p-6">
+        <Logo size="lg" />
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </main>
+    )
   }
+
   if (!session?.user) {
     // The lobby is a Client Component, so we can't redirect from the server.
     // Fall back to a link; no middleware in the Better Auth migration —
     // /room/[matchId]/page.tsx (server component) is what gates app entry.
     return (
-      <main className="mx-auto max-w-md p-8">
-        <p>
-          Please{' '}
-          <a className="text-blue-600 underline" href="/auth/signin">
-            sign in
-          </a>{' '}
-          to play.
+      <main className="mx-auto flex min-h-svh max-w-md flex-col items-center justify-center gap-6 p-6 text-center">
+        <Logo size="lg" />
+        <div className="h-px w-24 bg-gold/60" />
+        <p className="text-sm text-muted-foreground">
+          Sign in to create or join a match.
         </p>
+        <Button asChild size="lg">
+          <a href="/auth/signin">Sign in to play</a>
+        </Button>
       </main>
     )
   }
@@ -108,80 +123,93 @@ export default function Lobby() {
     session.user.email?.split('@')[0]?.trim() ||
     'Player'
   const canJoin = !busy && parseMatchCode(matchCode).length > 0
-  // Lint: authClient is imported for type-flow but only used indirectly
-  // through useSession + signOut. Reference it once so the import isn't
-  // flagged as unused in environments where TS pure-import detection drops
-  // the side-effect.
-  void authClient
 
   return (
-    <main className="mx-auto max-w-md p-8">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-3xl font-semibold">Coup Online</h1>
-        <button
-          onClick={() => void handleSignOut()}
-          className="text-sm text-gray-600 hover:underline"
-        >
-          Sign out
-        </button>
-      </div>
-      <p className="mb-6 text-sm text-gray-500">
-        Signed in as{' '}
-        <span dir="auto" className="font-medium text-gray-700">
-          {displayName}
+    <main className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-6 p-6">
+      <header className="flex flex-col items-center gap-3 text-center">
+        <Logo size="lg" />
+        <div className="h-px w-24 bg-gold/60" />
+        <p className="text-sm text-muted-foreground">
+          A game of deception and nerve — 3 to 6 players.
+        </p>
+      </header>
+
+      <div className="flex items-center justify-between rounded-lg border bg-card/70 px-3 py-2 text-sm">
+        <span className="flex min-w-0 items-center gap-2">
+          <Avatar className="size-7">
+            <AvatarImage src={session.user.image ?? undefined} alt="" />
+            <AvatarFallback>{displayName.charAt(0).toUpperCase()}</AvatarFallback>
+          </Avatar>
+          <span className="truncate text-muted-foreground">
+            Signed in as{' '}
+            <span dir="auto" className="font-medium text-foreground">
+              {displayName}
+            </span>
+          </span>
         </span>
-        .
-      </p>
+        <Button variant="ghost" size="sm" onClick={() => void handleSignOut()}>
+          Sign out
+        </Button>
+      </div>
 
-      <button
-        onClick={handleCreate}
-        disabled={busy}
-        className="mb-4 w-full rounded bg-blue-600 p-2 text-white disabled:bg-gray-300"
-      >
-        Create new match
-      </button>
-
-      <div className="my-4 text-center text-sm text-gray-400">or</div>
-
-      <label className="mb-2 block">
-        <span className="block text-sm font-medium">Match code</span>
-        <div className="mt-1 flex gap-2">
-          <input
-            dir="auto"
-            value={matchCode}
-            onChange={(e) => setMatchCode(e.target.value)}
-            onPaste={(e) => {
-              // Intercept paste to normalize URLs into the bare code. Lets
-              // users paste either a bare code or a full /room/<code> URL.
-              e.preventDefault()
-              const text = e.clipboardData.getData('text')
-              setMatchCode(parseMatchCode(text))
-            }}
-            placeholder="paste code or link"
-            className="block w-full rounded border border-gray-300 p-2 uppercase"
-          />
-          <button
-            type="button"
-            onClick={handlePaste}
-            className="rounded bg-gray-200 px-3 text-sm hover:bg-gray-300"
+      <Card>
+        <CardContent className="flex flex-col gap-4">
+          <Button
+            size="lg"
+            className="w-full"
+            onClick={() => void handleCreate()}
+            disabled={busy}
           >
-            Paste
-          </button>
-        </div>
-      </label>
+            Create new match
+          </Button>
 
-      <button
-        onClick={handleJoin}
-        disabled={!canJoin}
-        className="w-full rounded bg-green-600 p-2 text-white disabled:bg-gray-300"
-      >
-        Join match
-      </button>
+          <div className="flex items-center gap-3">
+            <Separator className="flex-1" />
+            <span className="text-xs tracking-widest text-muted-foreground uppercase">
+              or
+            </span>
+            <Separator className="flex-1" />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="match-code">Match code</Label>
+            <div className="flex gap-2">
+              <Input
+                id="match-code"
+                dir="auto"
+                value={matchCode}
+                onChange={(e) => setMatchCode(e.target.value)}
+                onPaste={(e) => {
+                  // Intercept paste to normalize URLs into the bare code. Lets
+                  // users paste either a bare code or a full /room/<code> URL.
+                  e.preventDefault()
+                  const text = e.clipboardData.getData('text')
+                  setMatchCode(parseMatchCode(text))
+                }}
+                placeholder="paste code or link"
+                className="uppercase"
+              />
+              <Button type="button" variant="outline" onClick={() => void handlePaste()}>
+                Paste
+              </Button>
+            </div>
+            <Button
+              variant="success"
+              size="lg"
+              className="w-full"
+              onClick={() => void handleJoin()}
+              disabled={!canJoin}
+            >
+              Join match
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {error && (
-        <p className="mt-4 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-700">
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
     </main>
   )

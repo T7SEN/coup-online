@@ -32,6 +32,8 @@ export function buildPlayerView(state: GameState, viewerId: PlayerId): PlayerVie
       isAlive: s.isAlive,
       isDisconnected: s.isDisconnected,
       influence: s.influence.map((inf) => sliceInfluence(inf, isMe)),
+      // ?? null guards a GameState rehydrated from before this field existed.
+      eliminationOrder: s.eliminationOrder ?? null,
     }
   })
 

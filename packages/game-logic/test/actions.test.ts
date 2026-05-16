@@ -38,6 +38,7 @@ function makeSeat(playerId: string, displayName: string): ServerSeat {
     coins: 2,
     isAlive: true,
     isDisconnected: false,
+    eliminationOrder: null,
     influence: [
       { status: 'face-down', kind: 'Duke' },
       { status: 'face-down', kind: 'Assassin' },
@@ -466,6 +467,22 @@ describe('applyInfluencePick — happy path', () => {
     expect(state.seats[1].isAlive).toBe(false)
   })
 
+  it('stamps eliminationOrder when the pick eliminates the player', () => {
+    const state = stateMidCoup()
+    expect(state.seats[1].eliminationOrder).toBeNull()
+    state.seats[1].influence[1] = { status: 'revealed', kind: 'Assassin' }
+    applyInfluencePick(state, 'p1', 0)
+    expect(state.seats[1].isAlive).toBe(false)
+    expect(state.seats[1].eliminationOrder).toBe(1) // first (only) elimination
+  })
+
+  it('leaves eliminationOrder null on a non-eliminating pick', () => {
+    const state = stateMidCoup()
+    applyInfluencePick(state, 'p1', 0) // p1 still has one face-down card
+    expect(state.seats[1].isAlive).toBe(true)
+    expect(state.seats[1].eliminationOrder).toBeNull()
+  })
+
   it('skips the eliminated target in turn advance', () => {
     const state = stateMidCoup()
     state.seats[1].influence[1] = { status: 'revealed', kind: 'Assassin' }
@@ -638,6 +655,7 @@ describe('Coup + influence-pick — full sequences', () => {
     applyCoup(state, 'p0', 'p1')
     applyInfluencePick(state, 'p1', 0)
     expect(state.seats[1].isAlive).toBe(false)
+    expect(state.seats[1].eliminationOrder).toBe(1) // first out
     expect(state.phase).toBe('AWAITING_ACTION')
     expect(state.turnIndex).toBe(2) // turn skipped to p2
 
@@ -647,6 +665,8 @@ describe('Coup + influence-pick — full sequences', () => {
     applyCoup(state, 'p2', 'p0')
     applyInfluencePick(state, 'p0', 0)
     expect(state.seats[0].isAlive).toBe(false)
+    expect(state.seats[0].eliminationOrder).toBe(2) // second out
+    expect(state.seats[2].eliminationOrder).toBeNull() // survivor
     expect(state.phase).toBe('GAME_OVER')
   })
 })
