@@ -1,11 +1,11 @@
 ---
 name: coup-online
-description: Engineering guide for Coup Online — a 3–6 player real-time competitive social-deduction card game adapting Coup (Rikki Tahta, Indie Boards & Cards, 2012) to the web. Repo github.com/T7SEN/coup-online. LOAD for ANY task in this repo: features, fixes, game-rule implementation, action/challenge/block state machine, lobby + matchmaking, TrueSkill rating, WebSocket protocol, Durable Objects, deployment, server actions, auth. Triggers: Coup, social deduction, bluffing card game, Duke, Assassin, Captain, Ambassador, Contessa, influence card, challenge, block, counteraction, Durable Object, DO Hibernation, SQLite-backed DO, matchmaking, TrueSkill, MMR, 3-6 players, hidden information, server-authoritative, PlayerView, Coup Online, T7SEN, GSAP, Flip plugin, Cloudflare D1. Stack: Next.js 16, React 19, Tailwind v4, shadcn/ui, Cloudflare Workers + Durable Objects (SQLite-backed only), Hono, Cloudflare D1 + Drizzle, Better Auth on the Worker (Google + Discord + email magic link), Zod, GSAP + @gsap/react + Flip plugin, ts-trueskill, pnpm workspaces. Free-tier only — no paid services in v1. Enforces patterns invisible to training: server-authoritative card state, per-recipient PlayerView slicing on every broadcast, Hibernation-API WebSockets, SQLite-backed DOs (free-tier requirement), Worker-owned D1 (no direct Next.js D1 access), strict action-state-machine phase guards, mandatory-Coup at 10 coins, challenge-race tie-break by server timestamp, Web Crypto only (no Math.random, no node:crypto), Drizzle on Workers (no Prisma, no Neon), Better Auth co-located with D1 on the Worker (no Auth.js / next-auth at any version), Tailwind v4 CSS-first (no tailwind.config.ts), GSAP for animations (no Framer Motion), TrueSkill for rating (no Elo/Glicko-2), Cloudflare Web Analytics (no Vercel Analytics). Skipping produces card-leak vulnerabilities, illegal game states, replay-poisoned shuffles, broken challenge races, paid-tier bills, or matches that don't update ratings correctly.
+description: Engineering guide for Coup Online — a 3–6 player real-time PvP Coup card game at github.com/T7SEN/coup-online. LOAD for ANY task in this repo: features, game rules, state machine, matchmaking, WebSocket, Durable Objects, D1, auth, deployment. Triggers: Coup, Duke, Assassin, Captain, Ambassador, Contessa, PlayerView, Durable Object, TrueSkill, T7SEN, GSAP, Better Auth, D1. Stack: Next.js 16, Tailwind v4, Cloudflare Workers + SQLite DOs, Hono, D1 + Drizzle, Better Auth (Google + Discord + magic link), GSAP + Flip, ts-trueskill, pnpm. Free-tier only. Enforces patterns invisible to training: server-authoritative cards, per-recipient PlayerView, Hibernation WebSockets, SQLite-backed DOs only, Worker-owned D1, phase guards, mandatory Coup at 10 coins, Web Crypto only (no Math.random), Drizzle (no Prisma/Neon), Better Auth (no Auth.js), Tailwind v4 CSS-first, GSAP (no Framer Motion), TrueSkill (no Elo/Glicko), Cloudflare Web Analytics (no Vercel). Skipping produces card leaks, illegal states, or paid bills.
 ---
 
 # Coup Online — Pre-Flight Skill
 
-Canonical agent guide for the Coup Online project — a faithful web adaptation of the Coup card game (Rikki Tahta, 2012) for 3–6 players, real-time, with persistent accounts, public matchmaking, ELO ranking, and spectator mode.
+Canonical agent guide for the Coup Online project — a faithful web adaptation of the Coup card game (Rikki Tahta, 2012) for 3–6 players, real-time, with persistent accounts, public matchmaking, TrueSkill rating, and spectator mode.
 
 When this skill is loaded, run the pre-flight checklist below before any code or proposal. The game's mechanics dictate the architecture: server authority is non-negotiable, hidden information must be enforced per-player on every state broadcast, and the action lifecycle contains race conditions only the server can resolve. **The project is free-tier only** — no paid services in v1. Most of what looks "obvious" in this stack is wrong (Socket.IO, Prisma, Neon, Framer Motion, `Math.random`, `next-auth` / Auth.js at any version, GitHub OAuth, Vercel Analytics, Glicko-2 / Elo) — read Section 6 before importing.
 
@@ -39,22 +39,22 @@ When unsure, ask one targeted question rather than guessing. Coup's edge cases (
 
 ## 1. Product Context
 
-| Attribute | Value |
-|-----------|-------|
-| Game | Coup (Rikki Tahta, 2012) — base game only, no expansions |
-| Players | 3–6 per match |
-| Pacing | Real-time, single live session (~15 minutes typical) |
-| Lobby | Private rooms (6-char codes) + public matchmaking queue |
-| Platform | Web only — desktop + mobile browser |
-| Identity | Persistent accounts via Better Auth (email magic link + Google + Discord). **No GitHub provider in v1.** |
-| Reconnection | 30s grace, then auto-forfeit (both cards revealed, player eliminated) |
-| Communication | Free text chat in lobby only. **No chat during active game.** |
-| Eliminated players | Spectator with public info only (same view as living players) |
-| Rating | Persistent: TrueSkill (mu/sigma/beta), match history, leaderboards, win rate |
-| Package manager | `pnpm` — never npm or yarn |
-| Repository | `github.com/T7SEN/coup-online` |
-| Cost posture | **Free tier only.** v1 ships on free Vercel Hobby + free Cloudflare Workers/D1/Web Analytics + free Sentry tier + free Resend tier. No paid services allowed without explicit approval. |
-| Production URL | Frontend: `https://coups.app` (Vercel). Game server: `https://coup-online-game-server.a-hitelare2.workers.dev` (Cloudflare Workers). See [`references/deployment.md`](./references/deployment.md). |
+| Attribute          | Value                                                                                                                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Game               | Coup (Rikki Tahta, 2012) — base game only, no expansions                                                                                                                                           |
+| Players            | 3–6 per match                                                                                                                                                                                      |
+| Pacing             | Real-time, single live session (~15 minutes typical)                                                                                                                                               |
+| Lobby              | Private rooms (6-char codes) + public matchmaking queue                                                                                                                                            |
+| Platform           | Web only — desktop + mobile browser                                                                                                                                                                |
+| Identity           | Persistent accounts via Better Auth (email magic link + Google + Discord). **No GitHub provider in v1.**                                                                                           |
+| Reconnection       | 30s grace, then auto-forfeit (both cards revealed, player eliminated)                                                                                                                              |
+| Communication      | Free text chat in lobby only. **No chat during active game.**                                                                                                                                      |
+| Eliminated players | Spectator with public info only (same view as living players)                                                                                                                                      |
+| Rating             | Persistent: TrueSkill (mu/sigma/beta), match history, leaderboards, win rate                                                                                                                       |
+| Package manager    | `pnpm` — never npm or yarn                                                                                                                                                                         |
+| Repository         | `github.com/T7SEN/coup-online`                                                                                                                                                                     |
+| Cost posture       | **Free tier only.** v1 ships on free Vercel Hobby + free Cloudflare Workers/D1/Web Analytics + free Sentry tier + free Resend tier. No paid services allowed without explicit approval.            |
+| Production URL     | Frontend: `https://coups.app` (Vercel). Game server: `https://coup-online-game-server.a-hitelare2.workers.dev` (Cloudflare Workers). See [`references/deployment.md`](./references/deployment.md). |
 
 **Banned features.** Never suggest, scaffold, or reference: co-op modes, AI bot opponents, custom or "house-rule" variants, expansion characters, in-game chat (lobby-only is the spec), voice chat, card trading or gifting, real-money currencies, microtransactions/lootboxes, any mechanic that lets a player see another player's face-down cards before reveal, GitHub OAuth (not in v1 provider list), or paid-tier services without explicit approval. Each of these breaks either the game's design integrity, the v1 scope, or the free-tier budget.
 
@@ -121,6 +121,7 @@ Pinned by `package.json` in each workspace. Do not upgrade as part of feature wo
 ### 3.1 Server-Authoritative Card State + PlayerView Slicing
 
 **No client ever receives another player's face-down card identity.** Clients receive a `PlayerView` — a per-recipient slice of game state where:
+
 - Their own face-down cards are present (so they see what they have).
 - Other players' face-down cards are represented as opaque hidden tokens (`{ status: "hidden" }`).
 - All face-up (revealed/lost) cards are public to everyone.
@@ -135,7 +136,7 @@ This pattern is invisible to most multiplayer training data, which assumes a sin
 Every player turn proceeds through a strict phase sequence. The server is the only entity that advances phases. Phases:
 
 1. **`AWAITING_ACTION`** — current player picks an action. Server validates: turn ownership, coin sufficiency, mandatory-Coup at ≥10 coins, target validity for targeted actions.
-2. **`CHALLENGE_WINDOW`** — 15-second timer. Any other player may challenge the claimed character (if the action requires one). Income, Foreign Aid, and Coup are unchallengeable; only their *blocks* (where applicable) can be challenged.
+2. **`CHALLENGE_WINDOW`** — 15-second timer. Any other player may challenge the claimed character (if the action requires one). Income, Foreign Aid, and Coup are unchallengeable; only their _blocks_ (where applicable) can be challenged.
 3. **`CHALLENGE_RESOLUTION`** — challenged player either reveals the claimed card (challenger loses an influence; claimant returns proven card to deck, shuffles, draws a replacement) or fails (claimant loses an influence; action is canceled, coins paid for Assassinate are still spent). **After a successful reveal**, control flows to `BLOCK_WINDOW` if the action is blockable (Steal, Assassinate, Foreign Aid), otherwise the action resolves and flow goes to `TURN_END`. **After a failed reveal** (claimant was bluffing), the action is canceled and flow goes to `TURN_END` (skipping any block window — there's nothing left to block).
 4. **`BLOCK_WINDOW`** — 15-second timer. Any player who can legally block claims the blocker character (Duke blocks Foreign Aid; Captain or Ambassador blocks Steal; Contessa blocks Assassinate). If no block declared, action resolves and flow goes to `TURN_END`.
 5. **`BLOCK_CHALLENGE_WINDOW`** — 15-second timer. Any player may challenge the block claim. Resolution follows the same rules as `CHALLENGE_RESOLUTION`: proven block → original action is canceled (block stands), failed block → blocker loses an influence and the original action resolves.
@@ -145,7 +146,7 @@ Every player turn proceeds through a strict phase sequence. The server is the on
 
 **Challenge race tie-break:** if two players send `challenge` messages within the same tick, the server's authoritative receive timestamp (`Date.now()` inside the DO) wins. Subsequent challenges in the same window are silently dropped — the client never learns it lost the race except by absence of effect.
 
-**Mandatory-Coup at 10 coins:** if a player starts their turn with ≥10 coins, their only legal action is Coup. The action menu must disable or hide all other options client-side — disabling them with an explanatory affordance (e.g. a tooltip stating the reason) is acceptable and preferred over hiding, since it tells the player *why*. Server enforces independently — never trust the client.
+**Mandatory-Coup at 10 coins:** if a player starts their turn with ≥10 coins, their only legal action is Coup. The action menu must disable or hide all other options client-side — disabling them with an explanatory affordance (e.g. a tooltip stating the reason) is acceptable and preferred over hiding, since it tells the player _why_. Server enforces independently — never trust the client.
 
 > **Deep dive:** the full state machine as implemented — per-action lifecycle diagrams, queue/pool semantics for `influenceLossQueue` and `exchangePool`, the complete error-code table, and v1 limitations — is in [`references/state-machine.md`](./references/state-machine.md).
 
@@ -154,6 +155,7 @@ Every player turn proceeds through a strict phase sequence. The server is the on
 Each match is one **SQLite-backed** Durable Object instance. Free-tier requirement: key-value-backed DOs are paid-plan-only; we use SQLite-backed exclusively. Declare via `new_sqlite_classes` in `wrangler.toml` migrations — never `new_classes` (that creates key-value-backed DOs and breaks the free tier).
 
 The DO:
+
 - Holds the canonical `GameState` in DO SQLite storage (transactional, durable).
 - Manages WebSocket connections via the **Hibernation API** — the DO sleeps between messages, compute drops to zero, connections persist via the runtime. **Hibernation is mandatory** — without it, every active match accrues continuous duration charges and the free tier evaporates.
 - Validates every inbound message against the protocol schema + the current state machine phase.
@@ -171,6 +173,7 @@ Private rooms skip the queue. The host generates a code via `RoomCodeRegistry`, 
 ### 3.5 Reconnection — 30s Grace
 
 When a player's WebSocket disconnects:
+
 - The DO marks them `disconnected` with a 30s server-side timer (DO Alarm).
 - The game **does not pause** unless it's the disconnected player's turn. If it's their turn, the action timer pauses; otherwise the turn proceeds.
 - On reconnect within 30s, they rejoin their seat with full `PlayerView` replayed.
@@ -180,6 +183,7 @@ When a player's WebSocket disconnects:
 ### 3.6 TrueSkill + Match Persistence
 
 On game end, the server writes (in one D1 transaction):
+
 - One `matches` row (matchId, started_at, ended_at, winner_user_id, seat_count).
 - N `match_players` rows (matchId, userId, seat, finishing_position, mu_before, sigma_before, mu_after, sigma_after).
 - N `mmr_history` deltas.
@@ -217,28 +221,29 @@ This section is the source of truth for game rules. If a Wikipedia article, Boar
 
 ### 4.3 General Actions (no character claim required)
 
-| Action | Effect | Challengeable | Blockable by |
-|---|---|---|---|
-| Income | Take 1 coin | No | — |
-| Foreign Aid | Take 2 coins | No | Duke (claim) |
-| Coup | Pay 7 coins, target loses an influence | No | — (always succeeds) |
+| Action      | Effect                                 | Challengeable | Blockable by        |
+| ----------- | -------------------------------------- | ------------- | ------------------- |
+| Income      | Take 1 coin                            | No            | —                   |
+| Foreign Aid | Take 2 coins                           | No            | Duke (claim)        |
+| Coup        | Pay 7 coins, target loses an influence | No            | — (always succeeds) |
 
 **Coup is mandatory if the acting player has ≥10 coins at turn start.**
 
 ### 4.4 Character Actions (claim required)
 
-| Action | Effect | Challengeable | Blockable by |
-|---|---|---|---|
-| Duke → Tax | Take 3 coins | Yes | — |
-| Assassin → Assassinate | Pay 3 coins, target loses an influence | Yes | Contessa (claim) |
-| Captain → Steal | Take up to 2 coins from target (or all if target has fewer) | Yes | Captain or Ambassador (claim) |
-| Ambassador → Exchange | Draw 2 from Court Deck, keep 2 of the 4-card pool, return 2 to deck (reshuffled) | Yes | — |
+| Action                 | Effect                                                                           | Challengeable | Blockable by                  |
+| ---------------------- | -------------------------------------------------------------------------------- | ------------- | ----------------------------- |
+| Duke → Tax             | Take 3 coins                                                                     | Yes           | —                             |
+| Assassin → Assassinate | Pay 3 coins, target loses an influence                                           | Yes           | Contessa (claim)              |
+| Captain → Steal        | Take up to 2 coins from target (or all if target has fewer)                      | Yes           | Captain or Ambassador (claim) |
+| Ambassador → Exchange  | Draw 2 from Court Deck, keep 2 of the 4-card pool, return 2 to deck (reshuffled) | Yes           | —                             |
 
 **Coins paid even if blocked or challenged-and-lost.** Assassinate's 3 coins are spent at action declaration, not at resolution.
 
 ### 4.5 Counteractions (blocks)
 
 Blocks are character claims and follow the same challenge resolution as actions.
+
 - **Duke** blocks Foreign Aid.
 - **Contessa** blocks Assassinate.
 - **Captain** blocks Steal.
@@ -305,38 +310,38 @@ Apply without prompting. These are codebase-wide conventions.
 
 If a search result, training memory, or autocomplete suggests one of these — it is wrong for this codebase.
 
-| What you might reach for | What this project uses instead |
-|---|---|
-| `socket.io`, `socket.io-client`, `engine.io` | Native WebSocket + DO Hibernation API. Socket.IO requires sticky sessions; DOs solve presence and per-room state natively. |
-| `prisma`, `@prisma/client`, `schema.prisma` | Drizzle ORM with the `drizzle-orm/d1` adapter. Edge-compatible, type-safe, free on Workers. Prisma is not Workers-native. |
-| **`@neondatabase/serverless`, `postgres.js`, Neon Postgres** | **Cloudflare D1** (SQLite) via Worker binding + `drizzle-orm/d1`. D1 has a more generous free tier (5 GB vs 0.5 GB), keeps the stack on one platform, and removes the cross-runtime driver problem. |
-| **Postgres-specific SQL** (JSONB, native arrays, `RETURNING *` with complex types, materialized views, partial indexes with function predicates, `tsvector`, range types) | **D1 is SQLite.** Use portable SQL or SQLite-native equivalents (JSON stored as TEXT + `json_extract`; arrays as joined rows; FTS via SQLite FTS5 extension). |
-| **Direct D1 queries from Next.js / Vercel** (`drizzle-orm/d1` imported in `apps/web`, D1 REST API client) | **Worker owns D1 exclusively.** Next.js never sees a D1 binding. All DB operations live on the Worker. Better Auth runs on the Worker too (Drizzle adapter → D1 binding); Next.js proxies `/api/auth/*` via `rewrites()`. |
-| `next-auth` / Auth.js (any version), `@auth/core`, `@auth/drizzle-adapter`, `[...nextauth].ts`, `getServerSession`, `NextAuthOptions` | **Better Auth** (`better-auth`) on the Worker. Auth.js was tried and retired in favor of Better Auth + D1 + Drizzle adapter co-located on Cloudflare. See `references/auth.md`. |
-| **GitHub OAuth provider** | **Not in v1.** Providers are Google + Discord + email magic link (via `better-auth/plugins/magic-link` + Resend). Adding GitHub requires explicit spec amendment. |
-| `tailwind.config.ts`, `tailwind.config.js` | Tailwind v4 CSS-first. All config in `globals.css` via `@theme` directive. |
-| `pages/` directory, `getServerSideProps`, `getStaticProps`, `getInitialProps` | App Router only. Server Components default. |
-| `node:crypto`, `crypto` module from Node | Web Crypto: `crypto.randomUUID()`, `crypto.getRandomValues()`. Workers don't have `node:crypto`. |
-| `Math.random()` for game logic | `crypto.getRandomValues()` seeding Fisher-Yates. Math.random is not crypto-secure and is replay-poisonous. |
-| `redis`, `ioredis`, Upstash as primary state store | Durable Object SQLite storage is the live source of truth during a match. D1 is post-game persistence. Redis is not in the stack. |
-| `express`, `fastify` in the game server | Hono. Runs on Workers natively; Express and Fastify don't. |
-| `mongoose`, MongoDB | D1 (SQLite) + Drizzle. |
-| **`motion`, `motion/react`, `framer-motion`** | **GSAP** via `gsap` core + `@gsap/react`'s `useGSAP` hook + `Flip` plugin for cross-component morph. GSAP became fully free in April 2025 under Webflow's stewardship. |
-| **`@vercel/analytics`, `@vercel/speed-insights`** | **Cloudflare Web Analytics** — beacon script in `<head>`, no NPM package, free, no event cap. Vercel Analytics caps at 2.5K events/month on Hobby. |
-| **Glicko-2, Elo, K-factor scaling, pairwise rating updates** | **TrueSkill** via `ts-trueskill`. N-player free-for-all is TrueSkill's native case; do not decompose to pairwise. |
-| **Key-value-backed Durable Objects** (`new_classes` in wrangler migrations) | **SQLite-backed Durable Objects only** (`new_sqlite_classes`). Key-value DOs are paid-plan-only; SQLite DOs are free-tier eligible. |
-| Polling endpoints for matchmaking | WebSocket subscription to the `MatchmakingQueue` DO. Polling is wasteful and laggy. |
-| Yjs, Automerge, or any CRDT for game state | Game state is server-authoritative, not collaborative. CRDTs would let clients propose state — exactly what we prevent. |
-| `useEffect` for data fetching in Server Components | Server Components don't have effects. Fetch in the async component body. |
-| `npm`, `yarn`, `yarn.lock`, `package-lock.json` | `pnpm` and `pnpm-lock.yaml`. Monorepo via pnpm workspaces. |
-| `localStorage` for session token | HTTP-only cookies (Better Auth manages these). WebSocket auth is a signed JWT in the upgrade query string, in memory only. |
-| Class components, `componentDidMount`, `setState({...})` | Functional components + hooks only. |
-| Storing card identities in Redux / Zustand / React state | Server is the truth. Client state is a *cache* of the latest `PlayerView` broadcast — opaque hidden tokens, never inferred identities. |
-| WebRTC for game state or chat | Game state goes through the server. WebRTC was considered for voice chat, which is banned. |
-| Custom WebSocket libraries (`ws`, `uwebsockets.js`) on the server | Workers WebSocket API + Hibernation. The `ws` package doesn't run on Workers. |
-| Per-feature client-side action validation as the "real" check | Server enforces every rule. Client validation is UX-only. |
-| Shared `GameState` broadcast to all clients | `PlayerView` per recipient. See § 3.1. |
-| **Paid-tier services** (Vercel Pro, Workers Paid, Neon Pro, Sentry Team, Postmark paid, Plausible) | **Free tier only in v1.** Introducing paid services requires explicit pricing discussion and approval. |
+| What you might reach for                                                                                                                                                  | What this project uses instead                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `socket.io`, `socket.io-client`, `engine.io`                                                                                                                              | Native WebSocket + DO Hibernation API. Socket.IO requires sticky sessions; DOs solve presence and per-room state natively.                                                                                                |
+| `prisma`, `@prisma/client`, `schema.prisma`                                                                                                                               | Drizzle ORM with the `drizzle-orm/d1` adapter. Edge-compatible, type-safe, free on Workers. Prisma is not Workers-native.                                                                                                 |
+| **`@neondatabase/serverless`, `postgres.js`, Neon Postgres**                                                                                                              | **Cloudflare D1** (SQLite) via Worker binding + `drizzle-orm/d1`. D1 has a more generous free tier (5 GB vs 0.5 GB), keeps the stack on one platform, and removes the cross-runtime driver problem.                       |
+| **Postgres-specific SQL** (JSONB, native arrays, `RETURNING *` with complex types, materialized views, partial indexes with function predicates, `tsvector`, range types) | **D1 is SQLite.** Use portable SQL or SQLite-native equivalents (JSON stored as TEXT + `json_extract`; arrays as joined rows; FTS via SQLite FTS5 extension).                                                             |
+| **Direct D1 queries from Next.js / Vercel** (`drizzle-orm/d1` imported in `apps/web`, D1 REST API client)                                                                 | **Worker owns D1 exclusively.** Next.js never sees a D1 binding. All DB operations live on the Worker. Better Auth runs on the Worker too (Drizzle adapter → D1 binding); Next.js proxies `/api/auth/*` via `rewrites()`. |
+| `next-auth` / Auth.js (any version), `@auth/core`, `@auth/drizzle-adapter`, `[...nextauth].ts`, `getServerSession`, `NextAuthOptions`                                     | **Better Auth** (`better-auth`) on the Worker. Auth.js was tried and retired in favor of Better Auth + D1 + Drizzle adapter co-located on Cloudflare. See `references/auth.md`.                                           |
+| **GitHub OAuth provider**                                                                                                                                                 | **Not in v1.** Providers are Google + Discord + email magic link (via `better-auth/plugins/magic-link` + Resend). Adding GitHub requires explicit spec amendment.                                                         |
+| `tailwind.config.ts`, `tailwind.config.js`                                                                                                                                | Tailwind v4 CSS-first. All config in `globals.css` via `@theme` directive.                                                                                                                                                |
+| `pages/` directory, `getServerSideProps`, `getStaticProps`, `getInitialProps`                                                                                             | App Router only. Server Components default.                                                                                                                                                                               |
+| `node:crypto`, `crypto` module from Node                                                                                                                                  | Web Crypto: `crypto.randomUUID()`, `crypto.getRandomValues()`. Workers don't have `node:crypto`.                                                                                                                          |
+| `Math.random()` for game logic                                                                                                                                            | `crypto.getRandomValues()` seeding Fisher-Yates. Math.random is not crypto-secure and is replay-poisonous.                                                                                                                |
+| `redis`, `ioredis`, Upstash as primary state store                                                                                                                        | Durable Object SQLite storage is the live source of truth during a match. D1 is post-game persistence. Redis is not in the stack.                                                                                         |
+| `express`, `fastify` in the game server                                                                                                                                   | Hono. Runs on Workers natively; Express and Fastify don't.                                                                                                                                                                |
+| `mongoose`, MongoDB                                                                                                                                                       | D1 (SQLite) + Drizzle.                                                                                                                                                                                                    |
+| **`motion`, `motion/react`, `framer-motion`**                                                                                                                             | **GSAP** via `gsap` core + `@gsap/react`'s `useGSAP` hook + `Flip` plugin for cross-component morph. GSAP became fully free in April 2025 under Webflow's stewardship.                                                    |
+| **`@vercel/analytics`, `@vercel/speed-insights`**                                                                                                                         | **Cloudflare Web Analytics** — beacon script in `<head>`, no NPM package, free, no event cap. Vercel Analytics caps at 2.5K events/month on Hobby.                                                                        |
+| **Glicko-2, Elo, K-factor scaling, pairwise rating updates**                                                                                                              | **TrueSkill** via `ts-trueskill`. N-player free-for-all is TrueSkill's native case; do not decompose to pairwise.                                                                                                         |
+| **Key-value-backed Durable Objects** (`new_classes` in wrangler migrations)                                                                                               | **SQLite-backed Durable Objects only** (`new_sqlite_classes`). Key-value DOs are paid-plan-only; SQLite DOs are free-tier eligible.                                                                                       |
+| Polling endpoints for matchmaking                                                                                                                                         | WebSocket subscription to the `MatchmakingQueue` DO. Polling is wasteful and laggy.                                                                                                                                       |
+| Yjs, Automerge, or any CRDT for game state                                                                                                                                | Game state is server-authoritative, not collaborative. CRDTs would let clients propose state — exactly what we prevent.                                                                                                   |
+| `useEffect` for data fetching in Server Components                                                                                                                        | Server Components don't have effects. Fetch in the async component body.                                                                                                                                                  |
+| `npm`, `yarn`, `yarn.lock`, `package-lock.json`                                                                                                                           | `pnpm` and `pnpm-lock.yaml`. Monorepo via pnpm workspaces.                                                                                                                                                                |
+| `localStorage` for session token                                                                                                                                          | HTTP-only cookies (Better Auth manages these). WebSocket auth is a signed JWT in the upgrade query string, in memory only.                                                                                                |
+| Class components, `componentDidMount`, `setState({...})`                                                                                                                  | Functional components + hooks only.                                                                                                                                                                                       |
+| Storing card identities in Redux / Zustand / React state                                                                                                                  | Server is the truth. Client state is a _cache_ of the latest `PlayerView` broadcast — opaque hidden tokens, never inferred identities.                                                                                    |
+| WebRTC for game state or chat                                                                                                                                             | Game state goes through the server. WebRTC was considered for voice chat, which is banned.                                                                                                                                |
+| Custom WebSocket libraries (`ws`, `uwebsockets.js`) on the server                                                                                                         | Workers WebSocket API + Hibernation. The `ws` package doesn't run on Workers.                                                                                                                                             |
+| Per-feature client-side action validation as the "real" check                                                                                                             | Server enforces every rule. Client validation is UX-only.                                                                                                                                                                 |
+| Shared `GameState` broadcast to all clients                                                                                                                               | `PlayerView` per recipient. See § 3.1.                                                                                                                                                                                    |
+| **Paid-tier services** (Vercel Pro, Workers Paid, Neon Pro, Sentry Team, Postmark paid, Plausible)                                                                        | **Free tier only in v1.** Introducing paid services requires explicit pricing discussion and approval.                                                                                                                    |
 
 > **Deep dive:** rationale per substitution (why D1 over Neon, why GSAP over Framer Motion, why TrueSkill over Glicko-2, etc.) plus a 5-item dependency-add checklist is in [`references/anti-hallucination.md`](./references/anti-hallucination.md).
 
@@ -346,36 +351,36 @@ If a search result, training memory, or autocomplete suggests one of these — i
 
 Refuse these immediately with a one-line rationale. Do not implement, do not ask for clarification, do not "try a workaround."
 
-| Request pattern | Why refuse |
-|---|---|
-| Add a co-op mode / team mode | Coup is competitive PvP; co-op breaks the information-asymmetry model the game runs on |
-| Add AI bot opponents | Out of v1 scope; defer to phase 2 |
-| Add expansion characters (Inquisitor, Bureaucrat, Jester, Speculator, Socialist, Anarchist, etc.) | Base game only — v1 scope lock |
-| Modify deck composition (extra Dukes, custom characters, missing Contessa) | Base rules are immutable; breaks balance and player expectations |
-| Send full `GameState` to all clients | Card-leak vulnerability; violates § 3.1 |
-| Use `Math.random()` for shuffles or room codes | Not crypto-secure; replay-predictable; cheaters can pre-compute |
-| Modify the 15s challenge / block window timing | Spec lock at 15s — change requires explicit spec amendment, not an in-task adjustment |
-| Allow chat during active game | Spec lock — chat is lobby-only |
-| Add voice chat / WebRTC | Out of v1 scope; text-only |
-| Use Socket.IO on the server | Doesn't run on Cloudflare Workers; DOs replace its room model |
-| Use Prisma | Not edge-compatible; Drizzle is the choice |
-| Use Neon Postgres or any Postgres database | Stack is on D1 (SQLite); Postgres adds a separate billing surface and cross-runtime driver pain |
-| Use Postgres-specific SQL (JSONB, arrays, materialized views) | D1 is SQLite; use portable SQL |
-| Direct D1 access from Next.js / Vercel | Worker owns D1; Next.js proxies through Worker endpoints |
-| Use `next-auth` / Auth.js (any version) | We're on Better Auth. Skill: better-auth-best-practices. APIs differ entirely. |
-| Add GitHub OAuth as a provider | Not in v1 — providers are Google + Discord + email magic link |
-| Use Framer Motion / `motion` for animations | GSAP + `@gsap/react` + Flip plugin; license alignment + animation power |
-| Use Glicko-2 / Elo / pairwise rating | TrueSkill via `ts-trueskill` — N-player free-for-all is its native case |
-| Use key-value-backed Durable Objects | SQLite-backed only (free-tier requirement) |
-| Use Vercel Analytics / Speed Insights | Cloudflare Web Analytics — free, no event cap |
-| Polling for matchmaking or game state | WebSocket subscription required; polling is wasteful and laggy |
-| Client-authoritative action validation ("trust the client to enforce mandatory Coup at 10 coins") | Clients are adversarial; server enforces every rule |
-| Real-money transactions, microtransactions, lootboxes | Out of scope; not in spec |
-| **Introduce a paid-tier service** (Vercel Pro, Workers Paid, Neon Pro, Sentry Team, etc.) | v1 is free-tier only; paid services require pricing discussion and approval |
-| Spectator can see all hands face-up | Spec lock — eliminated/spectators see public info only (§ 1) |
-| "Cheat code" or debug endpoint that reveals opponents' cards | No client-side bypass ever ships; tests use the server directly |
-| PWA / service worker / offline mode | § 3.7 — real-time game, online-required by design |
-| Universal `Math.random` + comment "good enough for shuffle" | Refuse without exception |
+| Request pattern                                                                                   | Why refuse                                                                                      |
+| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Add a co-op mode / team mode                                                                      | Coup is competitive PvP; co-op breaks the information-asymmetry model the game runs on          |
+| Add AI bot opponents                                                                              | Out of v1 scope; defer to phase 2                                                               |
+| Add expansion characters (Inquisitor, Bureaucrat, Jester, Speculator, Socialist, Anarchist, etc.) | Base game only — v1 scope lock                                                                  |
+| Modify deck composition (extra Dukes, custom characters, missing Contessa)                        | Base rules are immutable; breaks balance and player expectations                                |
+| Send full `GameState` to all clients                                                              | Card-leak vulnerability; violates § 3.1                                                         |
+| Use `Math.random()` for shuffles or room codes                                                    | Not crypto-secure; replay-predictable; cheaters can pre-compute                                 |
+| Modify the 15s challenge / block window timing                                                    | Spec lock at 15s — change requires explicit spec amendment, not an in-task adjustment           |
+| Allow chat during active game                                                                     | Spec lock — chat is lobby-only                                                                  |
+| Add voice chat / WebRTC                                                                           | Out of v1 scope; text-only                                                                      |
+| Use Socket.IO on the server                                                                       | Doesn't run on Cloudflare Workers; DOs replace its room model                                   |
+| Use Prisma                                                                                        | Not edge-compatible; Drizzle is the choice                                                      |
+| Use Neon Postgres or any Postgres database                                                        | Stack is on D1 (SQLite); Postgres adds a separate billing surface and cross-runtime driver pain |
+| Use Postgres-specific SQL (JSONB, arrays, materialized views)                                     | D1 is SQLite; use portable SQL                                                                  |
+| Direct D1 access from Next.js / Vercel                                                            | Worker owns D1; Next.js proxies through Worker endpoints                                        |
+| Use `next-auth` / Auth.js (any version)                                                           | We're on Better Auth. Skill: better-auth-best-practices. APIs differ entirely.                  |
+| Add GitHub OAuth as a provider                                                                    | Not in v1 — providers are Google + Discord + email magic link                                   |
+| Use Framer Motion / `motion` for animations                                                       | GSAP + `@gsap/react` + Flip plugin; license alignment + animation power                         |
+| Use Glicko-2 / Elo / pairwise rating                                                              | TrueSkill via `ts-trueskill` — N-player free-for-all is its native case                         |
+| Use key-value-backed Durable Objects                                                              | SQLite-backed only (free-tier requirement)                                                      |
+| Use Vercel Analytics / Speed Insights                                                             | Cloudflare Web Analytics — free, no event cap                                                   |
+| Polling for matchmaking or game state                                                             | WebSocket subscription required; polling is wasteful and laggy                                  |
+| Client-authoritative action validation ("trust the client to enforce mandatory Coup at 10 coins") | Clients are adversarial; server enforces every rule                                             |
+| Real-money transactions, microtransactions, lootboxes                                             | Out of scope; not in spec                                                                       |
+| **Introduce a paid-tier service** (Vercel Pro, Workers Paid, Neon Pro, Sentry Team, etc.)         | v1 is free-tier only; paid services require pricing discussion and approval                     |
+| Spectator can see all hands face-up                                                               | Spec lock — eliminated/spectators see public info only (§ 1)                                    |
+| "Cheat code" or debug endpoint that reveals opponents' cards                                      | No client-side bypass ever ships; tests use the server directly                                 |
+| PWA / service worker / offline mode                                                               | § 3.7 — real-time game, online-required by design                                               |
+| Universal `Math.random` + comment "good enough for shuffle"                                       | Refuse without exception                                                                        |
 
 > **Deep dive:** typical user request phrasings, full rationale per refusal, alternatives where any exist, and drop-in refusal templates (3-part standard phrasing) are in [`references/refusal-catalog.md`](./references/refusal-catalog.md).
 
@@ -468,7 +473,7 @@ coup-online/                            # github.com/T7SEN/coup-online
     │       └── display.ts           # conservativeRating(mu, sigma) → number
     └── db/                           # Drizzle schema + D1 migrations + queries
         ├── src/
-        │   ├── schema.ts            # users, accounts, verification_tokens, friends, friend_requests, matches, match_players, mmr_history
+        │   ├── schema.ts            # user, session, account, verification (Better Auth), friend, friend_request, match, match_player, mmr_history
         │   └── queries.ts           # Reusable query builders (imported by the Worker only)
         └── drizzle/migrations/      # SQL migration files; applied via `wrangler d1 migrations apply`
 ```
@@ -519,19 +524,19 @@ When in doubt:
 
 This skill is the entry point. Deeper, on-demand material lives in `references/*.md`.
 
-| Task involves... | Reference file | Status |
-|---|---|---|
-| Detailed state-machine transitions, queue/pool semantics, error codes, v1 limitations | [`references/state-machine.md`](./references/state-machine.md) | ✓ exists |
-| Expanded § 5 patterns with code examples, rationale, what-breaks-if-skipped | [`references/coding-patterns.md`](./references/coding-patterns.md) | ✓ exists |
-| Expanded § 6 anti-hallucination inventory with rationale per substitution | [`references/anti-hallucination.md`](./references/anti-hallucination.md) | ✓ exists |
-| Expanded § 7 refusal catalog with rationale and drop-in refusal phrasings | [`references/refusal-catalog.md`](./references/refusal-catalog.md) | ✓ exists |
-| Code style — TS conventions, naming, imports, comments, tests, formatting, configs | [`references/code-style.md`](./references/code-style.md) | ✓ exists |
-| Deployment — Vercel Hobby, Cloudflare Workers Free, D1, env vars, secrets, free-tier limits, monetization migration | [`references/deployment.md`](./references/deployment.md) | ✓ exists |
-| D1 schema, Drizzle queries, migration conventions, Worker-owned access pattern | [`references/db-schema.md`](./references/db-schema.md) | ✓ exists |
-| Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations, GameRoom impl | [`references/durable-objects.md`](./references/durable-objects.md) | ✓ exists |
-| Better Auth configuration on the Worker, JWT for WS handshake, Google + Discord + magic link providers, Next.js rewrites topology | [`references/auth.md`](./references/auth.md) | ✓ exists |
-| Web client design system — Renaissance-court theme, shadcn/ui, color/type tokens, component conventions | [`references/design-system.md`](./references/design-system.md) | ✓ exists |
-| GSAP animation patterns (useGSAP hook, reduced motion, the implemented animations) | [`references/animations.md`](./references/animations.md) | ✓ exists |
-| TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula | [`references/rating.md`](./references/rating.md) | ✓ exists |
+| Task involves...                                                                                                                  | Reference file                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Detailed state-machine transitions, queue/pool semantics, error codes, v1 limitations                                             | [`references/state-machine.md`](./references/state-machine.md)           |
+| Expanded § 5 patterns with code examples, rationale, what-breaks-if-skipped                                                       | [`references/coding-patterns.md`](./references/coding-patterns.md)       |
+| Expanded § 6 anti-hallucination inventory with rationale per substitution                                                         | [`references/anti-hallucination.md`](./references/anti-hallucination.md) |
+| Expanded § 7 refusal catalog with rationale and drop-in refusal phrasings                                                         | [`references/refusal-catalog.md`](./references/refusal-catalog.md)       |
+| Code style — TS conventions, naming, imports, comments, tests, formatting, configs                                                | [`references/code-style.md`](./references/code-style.md)                 |
+| Deployment — Vercel Hobby, Cloudflare Workers Free, D1, env vars, secrets, free-tier limits, monetization migration               | [`references/deployment.md`](./references/deployment.md)                 |
+| D1 schema, Drizzle queries, migration conventions, Worker-owned access pattern                                                    | [`references/db-schema.md`](./references/db-schema.md)                   |
+| Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations, GameRoom impl                                  | [`references/durable-objects.md`](./references/durable-objects.md)       |
+| Better Auth configuration on the Worker, JWT for WS handshake, Google + Discord + magic link providers, Next.js rewrites topology | [`references/auth.md`](./references/auth.md)                             |
+| Web client design system — Renaissance-court theme, shadcn/ui, color/type tokens, component conventions                           | [`references/design-system.md`](./references/design-system.md)           |
+| GSAP animation patterns (useGSAP hook, reduced motion, the implemented animations)                                                | [`references/animations.md`](./references/animations.md)                 |
+| TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula                                                    | [`references/rating.md`](./references/rating.md)                         |
 
 Until a reference exists, this SKILL.md is the single source for that topic. Treat its sections as authoritative.
