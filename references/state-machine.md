@@ -19,6 +19,7 @@ Defined in `packages/game-logic/src/state.ts`:
 | `timerEndsAt` | `number \| null` | Unix ms; set by DO, not by game-logic |
 | `influenceLossQueue` | `PlayerId[]` | FIFO queue; head is current INFLUENCE_LOSS picker |
 | `exchangePool` | `{ actorPlayerId, cards: CardKind[] } \| null` | 4-card pool during EXCHANGE_SELECTION |
+| `blockWindowPending` | `boolean` (optional) | True between a proven challenge of a blockable action and its `BLOCK_WINDOW`; see Queue & pool semantics |
 
 `ServerInfluence` is `{ status: 'face-down' \| 'revealed', kind: CardKind }`. The
 `hidden` variant is a slicing artifact in `Influence` (protocol) and never appears
@@ -80,9 +81,11 @@ BLOCK_WINDOW + target claims Captain or Ambassador → [applyBlock] → BLOCK_CH
   ├── timer expires → action canceled → concludeTurn
   ├── challenge proven → swap card → challenger picks → concludeTurn (no transfer)
   └── challenge disproven → transfer happens → blocker picks → concludeTurn
-CHALLENGE_WINDOW + challenge → as Tax above, but:
-  ├── proven → swap card → transfer → challenger picks → concludeTurn
-  └── disproven → claimant picks → concludeTurn
+CHALLENGE_WINDOW + challenge → [applyChallenge] (action-challenge variant):
+  ├── proven → swap card → challenger picks (INFLUENCE_LOSS) → BLOCK_WINDOW
+  │     (SKILL.md § 3.2 phase 3 — a blockable action still passes its block
+  │     window after a proven challenge; tracked by blockWindowPending)
+  └── disproven → claimant picks → concludeTurn (no transfer)
 ```
 
 Only the **target** can block Steal.
@@ -97,7 +100,8 @@ BLOCK_WINDOW + target claims Contessa → BLOCK_CHALLENGE_WINDOW
   ├── challenge proven → swap card → challenger (actor) picks → concludeTurn (target unhurt)
   └── challenge disproven → block fails → queue [blocker, target] → target picks TWICE → eliminated
 CHALLENGE_WINDOW + challenge:
-  ├── proven (actor has Assassin) → swap card → queue [challenger, target] → both pick → concludeTurn
+  ├── proven (actor has Assassin) → swap card → challenger picks (INFLUENCE_LOSS)
+  │     → BLOCK_WINDOW (target may still claim Contessa; tracked by blockWindowPending)
   └── disproven (actor bluffed) → claimant picks → concludeTurn (target unhurt)
 ```
 
@@ -150,9 +154,22 @@ court deck becomes `{ count }` only. SKILL.md § 3.1.
 - Head is the current picker.
 - After `applyInfluencePick` resolves, head is shifted off.
 - If queue still non-empty → stay in INFLUENCE_LOSS for next picker.
+- If queue empty AND `blockWindowPending` → transition to BLOCK_WINDOW.
 - If queue empty AND `exchangePool` set → transition to EXCHANGE_SELECTION.
-- If queue empty AND no `exchangePool` → `concludeTurn`.
+- If queue empty AND none of the above → `concludeTurn`.
 - Cleared defensively by `concludeTurn`.
+
+### `blockWindowPending`
+- Boolean, optional — `undefined` reads as `false` (a GameState rehydrated from
+  before the field existed).
+- Set `true` by `resolveActionChallenge` when a **Steal or Assassinate** claim
+  is challenged and **proven**. Per SKILL.md § 3.2 phase 3 the action's effect
+  is deferred: the challenger loses an influence, then the action must still
+  pass through `BLOCK_WINDOW`. `pendingAction` is deliberately kept alive across
+  the INFLUENCE_LOSS so the block window knows which action it is blocking.
+- When the `influenceLossQueue` drains with this set, `applyInfluencePick` (and
+  `forfeitPlayer`) transition to `BLOCK_WINDOW` and clear the flag.
+- Cleared by `concludeTurn` and when the action's actor forfeits.
 
 ### `exchangePool`
 - Set when Exchange's action effect applies (no-challenge timeout or proven challenge).
@@ -166,13 +183,18 @@ court deck becomes `{ count }` only. SKILL.md § 3.1.
 
 Single decision point used by every "action just resolved" call site
 (`applyChallengeWindowTimeout`, `applyBlockWindowTimeout`, `resolveActionChallenge`
-proven, `resolveBlockChallenge` disproven). Order:
+proven for Tax / Exchange, `resolveBlockChallenge` disproven). Order:
 
 1. Clear `pendingAction`, `pendingBlock`, `timerEndsAt` — they belonged to the
    just-resolved interaction.
 2. If `influenceLossQueue` is non-empty → `phase = INFLUENCE_LOSS`.
 3. Else if `exchangePool` is set → `phase = EXCHANGE_SELECTION`.
 4. Else → `concludeTurn` (win check + turn advance, or GAME_OVER).
+
+A proven challenge of a **blockable** action (Steal / Assassinate) does *not*
+route through this dispatcher — `resolveActionChallenge` inlines the transition
+to INFLUENCE_LOSS with `blockWindowPending` set, deferring the block window
+until the challenger's influence loss resolves.
 
 ## Challenge race tie-break — SKILL.md § 3.2
 
@@ -181,6 +203,11 @@ BLOCK_CHALLENGE_WINDOW. After the first call resolves, the phase changes to
 INFLUENCE_LOSS (or other), so subsequent `applyChallenge` calls bounce with
 `wrong_phase`. The DO is responsible for ordering concurrent messages by receive
 timestamp before invoking this handler.
+
+A `challenge` message that resolves to `wrong_phase` (it lost the race, or its
+window already closed) is **silently dropped** by the DO — no `error` is sent
+back to that connection. The loser learns only by absence of effect (SKILL.md
+§ 3.2). All other `IllegalActionError`s still surface as an `error` message.
 
 ## Error codes (stable identifiers for server error responses)
 
@@ -255,16 +282,21 @@ expires. Effect:
    the 4-card pool returns to the Court Deck (reshuffled per SKILL.md § 4.6
    anonymity rule) and `exchangePool` is nulled.
 4. If they were the actor of a pending action, the action and any pending
-   block evaporate. If they were the blocker of a pending block, both the
-   block AND the parent action evaporate (conservative v1 choice).
+   block evaporate (and `blockWindowPending` is cleared). If they were the
+   blocker of a pending block, the block is withdrawn and the original action
+   is resolved as if it had never been blocked: `applyActionEffect` runs, so
+   Foreign Aid pays out (+2 to the actor) while Steal / Assassinate fizzle —
+   their blocker IS the target, now eliminated, and the dead-target guard in
+   `applyActionEffect` makes the effect a no-op.
 5. Phase transitions:
    - `influenceLossQueue` non-empty → `INFLUENCE_LOSS` (next picker)
-   - `exchangePool` still set (forfeitee wasn't the actor) → `EXCHANGE_SELECTION`
+   - else `blockWindowPending` set → `BLOCK_WINDOW`
+   - else `exchangePool` still set (forfeitee wasn't the actor) → `EXCHANGE_SELECTION`
    - else → `concludeTurn` (advances to next living seat, or `GAME_OVER` if
      this forfeit eliminated the second-to-last player)
 
 Idempotent on already-eliminated seats. Covered by
-`packages/game-logic/test/forfeit.test.ts` (11 tests).
+`packages/game-logic/test/forfeit.test.ts` (12 tests).
 
 ## Where to extend
 

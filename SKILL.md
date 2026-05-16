@@ -145,7 +145,7 @@ Every player turn proceeds through a strict phase sequence. The server is the on
 
 **Challenge race tie-break:** if two players send `challenge` messages within the same tick, the server's authoritative receive timestamp (`Date.now()` inside the DO) wins. Subsequent challenges in the same window are silently dropped — the client never learns it lost the race except by absence of effect.
 
-**Mandatory-Coup at 10 coins:** if a player starts their turn with ≥10 coins, their only legal action is Coup. The action menu must hide all other options client-side. Server enforces independently — never trust the client.
+**Mandatory-Coup at 10 coins:** if a player starts their turn with ≥10 coins, their only legal action is Coup. The action menu must disable or hide all other options client-side — disabling them with an explanatory affordance (e.g. a tooltip stating the reason) is acceptable and preferred over hiding, since it tells the player *why*. Server enforces independently — never trust the client.
 
 > **Deep dive:** the full state machine as implemented — per-action lifecycle diagrams, queue/pool semantics for `influenceLossQueue` and `exchangePool`, the complete error-code table, and v1 limitations — is in [`references/state-machine.md`](./references/state-machine.md).
 
@@ -264,7 +264,7 @@ Last player with at least one face-down card wins. Game ends immediately upon el
 
 ### 4.9 Forced Coup at 10+ Coins
 
-If a player **starts their turn** with ≥10 coins, their only legal action is Coup. Client action menu hides all other options. Server enforces independently — clients are advisory only.
+If a player **starts their turn** with ≥10 coins, their only legal action is Coup. The client action menu disables or hides all other options — greying them out with an explanatory tooltip is acceptable and preferred over hiding. Server enforces independently — clients are advisory only.
 
 ---
 
