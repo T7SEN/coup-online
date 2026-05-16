@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="400" height="600">
+  <title>Coup</title>
+  <rect x="0" y="0" width="400" height="600" rx="22" fill="#ffffff"/>
+  <rect x="12" y="12" width="376" height="576" rx="18" fill="#0d1f29"/>
+  <text x="200" y="305" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="700" font-size="22" fill="#ffffff" letter-spacing="3">COUP</text>
+</svg>

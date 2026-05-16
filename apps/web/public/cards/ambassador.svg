@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="400" height="600">
+  <title>Ambassador</title>
+  <rect x="0" y="0" width="400" height="600" rx="22" fill="#ffffff"/>
+  <rect x="12" y="12" width="376" height="576" rx="18" fill="#3f8a5e"/>
+
+  <g transform="translate(200 290)">
+    <path d="M0 -52 L52 0 L0 52 L-52 0 Z" fill="#a5d3b0"/>
+    <path d="M-30 -90 L30 -90 L0 -65 Z" fill="#7ab98c"/>
+    <path d="M-30 65 L30 65 L0 90 Z" fill="#7ab98c"/>
+    <path d="M-38 88 L38 88 L0 120 Z" fill="#7ab98c"/>
+    <path d="M-90 -16 L-90 16 L-65 0 Z" fill="#7ab98c"/>
+    <path d="M90 -16 L90 16 L65 0 Z" fill="#7ab98c"/>
+  </g>
+
+  <text x="200" y="478" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="700" font-size="26" fill="#ffffff" letter-spacing="3">AMBASSADOR</text>
+  <text x="200" y="518" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="400" font-size="15" fill="#dfeee3" letter-spacing="2">EXCHANGE TWO CARDS</text>
+  <text x="200" y="540" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="400" font-size="15" fill="#dfeee3" letter-spacing="2">BLOCK STEALING</text>
+</svg>

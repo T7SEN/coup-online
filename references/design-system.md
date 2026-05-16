@@ -33,7 +33,7 @@ script pnpm 11 blocks (`ERR_PNPM_IGNORED_BUILDS`), which breaks installs.
 ## Color tokens
 
 CSS variables (oklch) in `app/globals.css` `:root`, exposed as Tailwind color
-utilities through `@theme inline` (so `bg-primary`, `text-char-duke`, etc. work).
+utilities through `@theme inline` (so `bg-primary`, `text-muted-foreground`, etc. work).
 
 **shadcn semantic tokens** (standard): `background`, `foreground`, `card`,
 `popover`, `primary`, `secondary`, `muted`, `accent`, `destructive`, `border`,
@@ -50,14 +50,7 @@ utilities through `@theme inline` (so `bg-primary`, `text-char-duke`, etc. work)
 |---|---|
 | `gold` / `gold-foreground` | antique gold — rules, crests, the winner highlight |
 | `success` / `success-foreground` | muted forest green — the "join / keep" affirmative |
-| `char-duke` | Duke — royal purple |
-| `char-assassin` | Assassin — charcoal |
-| `char-captain` | Captain — steel blue |
-| `char-ambassador` | Ambassador — forest green |
-| `char-contessa` | Contessa — rose-red |
-
-The five `char-*` colors mirror the tabletop card colors; `InfluenceCard` uses
-them so a card reads as its character at a glance.
+| `table` / `table-foreground` | the dark felt surface of the game-room board |
 
 ## Typography
 
@@ -82,9 +75,20 @@ shadcn's `rounded-sm/md/lg/xl` derive from it.
 - **`components/`** (non-`ui`) — hand-authored game components, in the project's
   authored style (single quotes, no semicolons):
   - `Logo` — the "COUP Online" wordmark (`size`: `sm` / `md` / `lg`).
-  - `InfluenceCard` — one influence card: `hidden` (blank back) / `face-down`
-    (own, character-coloured) / `revealed` (lost, struck through).
-  - `SeatCard` — a player's seat tile in the game grid.
+  - `InfluenceCard` — renders the player-supplied card art from `public/cards/`
+    (`duke.svg`, `assassin.svg`, `captain.svg`, `ambassador.svg`, `contessa.svg`,
+    and `back.svg`), authored 400×600 (a 2:3 ratio). States: `face-down` (the
+    character's art), `revealed` (lost — the art faded, greyed and struck
+    through), `hidden` (the `back.svg` card back). `size`: `sm` (seat grid) / `md`.
+    Clicking a card opens an enlarged lightbox (a Radix `Dialog`) — click the
+    big card, the backdrop, or press Escape to close.
+    To restyle the cards, replace the SVGs in `public/cards/` — no code change.
+  - `SeatCard` — an opponent's seat tile (compact: name, coins, two `sm` cards).
+  - `PlayerHand` — the viewer's own seat, shown large along the bottom of the
+    table: two `md` cards, name, coins, turn state.
+- **The game room is a felt "table"** (`bg-table`) — opponents up top, a court
+  centre (phase / timer / deck / action in play), your hand along the bottom;
+  the action bars sit below the table as the control strip.
 - **Disabled buttons explain themselves** via a Radix `Tooltip`. A disabled
   `<button>` emits no pointer events, so the `TooltipTrigger` wraps a `<span>`.
   See `AffordedButton` in `app/room/[matchId]/client.tsx`.

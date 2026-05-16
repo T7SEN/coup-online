@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Copy } from 'lucide-react'
 import { toast } from 'sonner'
+import { useGSAP } from '@gsap/react'
+import gsap from 'gsap'
 import type {
   Action,
   BlockerCharacter,
@@ -12,6 +14,8 @@ import type {
   ServerMessage,
 } from '@coup-online/protocol'
 import { Logo } from '@/components/logo'
+import { AppearOnMount, MOTION_ENABLED, NO_REDUCED_MOTION } from '@/components/motion'
+import { PlayerHand } from '@/components/player-hand'
 import { SeatCard } from '@/components/seat-card'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -410,6 +414,29 @@ function GamePanel({
     view.timerEndsAt != null ? Math.max(0, Math.ceil((view.timerEndsAt - now) / 1000)) : null
   const turnName =
     view.seats.find((s) => s.playerId === view.turnPlayerId)?.displayName ?? '—'
+  const opponents = view.seats.filter((s) => !s.isMe)
+
+  // Deal-in: when the board first mounts, the table eases in and the cards
+  // stagger up into their seats. SKILL.md § 2 / references/animations.md.
+  const tableRef = useRef<HTMLDivElement>(null)
+  useGSAP(
+    () => {
+      const el = tableRef.current
+      if (!MOTION_ENABLED || !el) return
+      const mm = gsap.matchMedia()
+      mm.add(NO_REDUCED_MOTION, () => {
+        const tl = gsap.timeline()
+        tl.from(el, { opacity: 0, scale: 0.97, duration: 0.4, ease: 'power2.out' })
+        tl.from(
+          el.querySelectorAll('[data-card]'),
+          { y: 26, opacity: 0, stagger: 0.05, duration: 0.4, ease: 'power2.out' },
+          '-=0.15',
+        )
+      })
+      return () => mm.revert()
+    },
+    { scope: tableRef },
+  )
 
   return (
     <section className="flex flex-col gap-4">
@@ -423,73 +450,68 @@ function GamePanel({
         </Alert>
       )}
 
-      <Card>
-        <CardContent className="flex flex-col gap-1.5 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Phase</span>
-            <span className="font-display tracking-wide">{prettyPhase(view.phase)}</span>
-            {timerSeconds != null && (
-              <Badge variant={timerSeconds <= 5 ? 'destructive' : 'secondary'}>
-                {timerSeconds}s
-              </Badge>
-            )}
+      {/* The table — opponents up top, the court in the middle, your hand below. */}
+      <div
+        ref={tableRef}
+        className="relative overflow-hidden rounded-2xl border border-gold/20 bg-table p-4 text-table-foreground shadow-[inset_0_3px_30px_rgba(0,0,0,0.42)] sm:p-6"
+      >
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(ellipse 70% 55% at 50% 40%, oklch(0.44 0.05 152 / 0.5), transparent 78%)',
+          }}
+        />
+        <div className="relative flex flex-col gap-5">
+          <div className="flex flex-wrap justify-center gap-3">
+            {opponents.map((seat) => (
+              <SeatCard
+                key={seat.playerId}
+                seat={seat}
+                isTurn={seat.playerId === view.turnPlayerId}
+              />
+            ))}
           </div>
-          <div>
-            <span className="text-muted-foreground">Turn</span>{' '}
-            <span dir="auto" className="font-medium">
-              {turnName}
-            </span>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Court deck</span>{' '}
-            {view.courtDeck.count} card{view.courtDeck.count === 1 ? '' : 's'}
-          </div>
-          {view.pendingAction && <PendingActionLine view={view} pa={view.pendingAction} />}
-          {view.pendingBlock && (
-            <div>
-              <span className="text-muted-foreground">Block claim</span>{' '}
-              <span dir="auto">
-                {
-                  view.seats.find((s) => s.playerId === view.pendingBlock!.blockerPlayerId)
-                    ?.displayName
-                }
-              </span>{' '}
-              → {view.pendingBlock.claimedCharacter}
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
-      <div className="grid gap-2.5 sm:grid-cols-2">
-        {view.seats.map((seat) => (
-          <SeatCard
-            key={seat.playerId}
-            seat={seat}
-            isTurn={seat.playerId === view.turnPlayerId}
-          />
-        ))}
+          <CourtCenter view={view} timerSeconds={timerSeconds} turnName={turnName} />
+
+          {me && <PlayerHand seat={me} isTurn={isMyTurn} />}
+        </div>
       </div>
 
       {/* Action / challenge / block bars are gated by phase + role here so the
           server rarely sees an action it has to reject. Server is still
           authoritative — these gates exist to reduce error-toast noise. */}
       {view.phase === 'AWAITING_ACTION' && me?.isAlive && (
-        <ActionBar view={view} me={me} isMyTurn={isMyTurn} send={send} />
+        <AppearOnMount>
+          <ActionBar view={view} me={me} isMyTurn={isMyTurn} send={send} />
+        </AppearOnMount>
       )}
 
       {(view.phase === 'CHALLENGE_WINDOW' || view.phase === 'BLOCK_CHALLENGE_WINDOW') &&
-        me?.isAlive && <ChallengeBar view={view} send={send} />}
+        me?.isAlive && (
+          <AppearOnMount>
+            <ChallengeBar view={view} send={send} />
+          </AppearOnMount>
+        )}
 
       {view.phase === 'BLOCK_WINDOW' && me?.isAlive && (
-        <BlockBar view={view} send={send} />
+        <AppearOnMount>
+          <BlockBar view={view} send={send} />
+        </AppearOnMount>
       )}
 
       {view.phase === 'INFLUENCE_LOSS' && (
-        <InfluenceLossSection view={view} me={me ?? null} send={send} />
+        <AppearOnMount>
+          <InfluenceLossSection view={view} me={me ?? null} send={send} />
+        </AppearOnMount>
       )}
 
       {view.phase === 'EXCHANGE_SELECTION' && isMyTurn && exchangeCards && (
-        <ExchangeBar cards={exchangeCards} send={send} />
+        <AppearOnMount>
+          <ExchangeBar cards={exchangeCards} send={send} />
+        </AppearOnMount>
       )}
       {view.phase === 'EXCHANGE_SELECTION' && isMyTurn && !exchangeCards && (
         <p className="text-sm text-muted-foreground">Waiting for exchange prompt…</p>
@@ -517,14 +539,95 @@ function PendingActionLine({
     ? (view.seats.find((s) => s.playerId === targetId)?.displayName ?? '?')
     : null
   return (
-    <div>
-      <span className="text-muted-foreground">Pending</span>{' '}
-      <span dir="auto">{actor}</span> → {action.kind}
+    <p className="text-sm">
+      <span className="text-table-foreground/55">Pending</span>{' '}
+      <span dir="auto" className="font-medium">
+        {actor}
+      </span>{' '}
+      → {action.kind}
       {targetName && (
         <>
           {' '}
-          (target: <span dir="auto">{targetName}</span>)
+          (target:{' '}
+          <span dir="auto" className="font-medium">
+            {targetName}
+          </span>
+          )
         </>
+      )}
+    </p>
+  )
+}
+
+// A small two-card stack of backs — the Court Deck sitting on the table.
+function CourtDeck() {
+  return (
+    <span className="relative block h-11 w-9 shrink-0">
+      <span
+        aria-hidden
+        style={{ backgroundImage: 'url(/cards/back.svg)' }}
+        className="absolute top-0.5 left-2 aspect-[2/3] w-6 rounded-[3px] bg-cover opacity-70 ring-1 ring-black/25"
+      />
+      <span
+        aria-hidden
+        style={{ backgroundImage: 'url(/cards/back.svg)' }}
+        className="absolute top-1.5 left-0.5 aspect-[2/3] w-6 rounded-[3px] bg-cover shadow-sm ring-1 ring-black/30"
+      />
+    </span>
+  )
+}
+
+// The middle of the table — phase, timer, whose turn it is, the Court Deck,
+// and the action currently in play.
+function CourtCenter({
+  view,
+  timerSeconds,
+  turnName,
+}: {
+  view: PlayerView
+  timerSeconds: number | null
+  turnName: string
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2 py-1 text-center">
+      <div className="flex items-center gap-2">
+        <span className="font-display text-lg tracking-wide">
+          {prettyPhase(view.phase)}
+        </span>
+        {timerSeconds != null && (
+          <Badge variant={timerSeconds <= 5 ? 'destructive' : 'secondary'}>
+            {timerSeconds}s
+          </Badge>
+        )}
+      </div>
+      <p className="text-sm text-table-foreground/70">
+        <span dir="auto" className="font-medium text-table-foreground">
+          {turnName}
+        </span>
+        ’s turn
+      </p>
+      <div className="flex items-center gap-2 text-xs text-table-foreground/65">
+        <CourtDeck />
+        <span>
+          {view.courtDeck.count} card{view.courtDeck.count === 1 ? '' : 's'} in
+          the deck
+        </span>
+      </div>
+      {view.pendingAction && (
+        <PendingActionLine view={view} pa={view.pendingAction} />
+      )}
+      {view.pendingBlock && (
+        <p className="text-sm">
+          <span className="text-table-foreground/55">Block</span>{' '}
+          <span dir="auto" className="font-medium">
+            {
+              view.seats.find(
+                (s) => s.playerId === view.pendingBlock!.blockerPlayerId,
+              )?.displayName
+            }
+          </span>{' '}
+          → {view.pendingBlock.claimedCharacter}
+        </p>
       )}
     </div>
   )

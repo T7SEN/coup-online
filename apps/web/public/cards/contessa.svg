@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="400" height="600">
+  <title>Contessa</title>
+  <rect x="0" y="0" width="400" height="600" rx="22" fill="#ffffff"/>
+  <rect x="12" y="12" width="376" height="576" rx="18" fill="#b04a36"/>
+
+  <g transform="translate(200 240)">
+    <!-- hexagonal gem: flat top, shoulders below top, pointed bottom -->
+    <path d="M-38 0 L38 0 L73 35 L0 105 L-73 35 Z" fill="#e8a857"/>
+    <!-- rust arch notch (inverted U) -->
+    <path d="M-24 91 L-24 38 A24 24 0 0 1 24 38 L24 91 Z" fill="#b04a36"/>
+    <!-- orange tongue tapering to gem's bottom point -->
+    <path d="M-9 45 L9 45 L9 91 L0 105 L-9 91 Z" fill="#e8a857"/>
+  </g>
+
+  <text x="200" y="478" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="700" font-size="26" fill="#ffffff" letter-spacing="3">CONTESSA</text>
+  <text x="200" y="518" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="400" font-size="15" fill="#f1d4c3" letter-spacing="2">BLOCK ASSASSINATION</text>
+</svg>

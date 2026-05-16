@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="400" height="600">
+  <title>Captain</title>
+  <rect x="0" y="0" width="400" height="600" rx="22" fill="#ffffff"/>
+  <rect x="12" y="12" width="376" height="576" rx="18" fill="#1f3f6b"/>
+
+  <g transform="translate(200 290)" fill="#5cb8e6">
+    <path d="M0 -100 L-26 -70 L-10 -70 L-10 -35 L10 -35 L10 -70 L26 -70 Z"/>
+    <path d="M-60 -25 L-30 -25 L-30 -10 L0 20 L30 -10 L30 -25 L60 -25 L0 35 Z"/>
+    <path d="M-60 25 L0 85 L60 25 L30 25 L0 55 L-30 25 Z"/>
+  </g>
+
+  <text x="200" y="478" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="700" font-size="26" fill="#ffffff" letter-spacing="3">CAPTAIN</text>
+  <text x="200" y="518" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="400" font-size="15" fill="#cfdce8" letter-spacing="2">STEAL TWO COINS</text>
+  <text x="200" y="540" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="400" font-size="15" fill="#cfdce8" letter-spacing="2">BLOCK STEALING</text>
+</svg>

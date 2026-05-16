@@ -15,7 +15,10 @@
       "default": "./dist/schema.js"
     }
   },
-  "files": ["dist", "drizzle"],
+  "files": [
+    "dist",
+    "drizzle"
+  ],
   "scripts": {
     "build": "tsc",
     "lint": "eslint",
@@ -24,14 +27,14 @@
     "migrations:list": "drizzle-kit list"
   },
   "dependencies": {
-    "drizzle-orm": "^0.36"
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4",
-    "@eslint/js": "^9",
-    "drizzle-kit": "^0.28",
-    "eslint": "^9",
-    "typescript": "^5",
-    "typescript-eslint": "^8"
+    "@cloudflare/workers-types": "^4.20260515.1",
+    "@eslint/js": "^9.39.4",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9.39.4",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.3"
   }
 }

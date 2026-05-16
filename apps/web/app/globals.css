@@ -48,12 +48,9 @@
   --success: oklch(0.52 0.1 150);
   --success-foreground: oklch(0.98 0.015 88);
 
-  /* The five characters — mirrors the tabletop card colors */
-  --char-duke: oklch(0.45 0.13 310);
-  --char-assassin: oklch(0.33 0.02 50);
-  --char-captain: oklch(0.5 0.1 245);
-  --char-ambassador: oklch(0.52 0.1 150);
-  --char-contessa: oklch(0.55 0.16 18);
+  /* Game table — the dark felt surface the board sits on (the room) */
+  --table: oklch(0.31 0.035 152);
+  --table-foreground: oklch(0.93 0.02 88);
 }
 
 @theme inline {
@@ -86,11 +83,8 @@
   --color-gold-foreground: var(--gold-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
-  --color-char-duke: var(--char-duke);
-  --color-char-assassin: var(--char-assassin);
-  --color-char-captain: var(--char-captain);
-  --color-char-ambassador: var(--char-ambassador);
-  --color-char-contessa: var(--char-contessa);
+  --color-table: var(--table);
+  --color-table-foreground: var(--table-foreground);
 
   --font-sans: var(--font-eb-garamond), ui-serif, Georgia, serif;
   --font-serif: var(--font-eb-garamond), ui-serif, Georgia, serif;

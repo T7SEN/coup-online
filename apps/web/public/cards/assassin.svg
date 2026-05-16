@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="400" height="600">
+  <title>Assassin</title>
+  <rect x="0" y="0" width="400" height="600" rx="22" fill="#ffffff"/>
+  <rect x="12" y="12" width="376" height="576" rx="18" fill="#4a4a4a"/>
+
+  <g transform="translate(200 290)">
+    <path d="M-60 30 L-60 -20 A60 60 0 0 1 60 -20 L60 30 Z" fill="#a8a8a8"/>
+    <path d="M-22 30 L22 30 L30 70 L-30 70 Z" fill="#a8a8a8"/>
+
+    <g stroke="#4a4a4a" stroke-width="9" stroke-linecap="round">
+      <line x1="14" y1="-15" x2="34" y2="5"/>
+      <line x1="34" y1="-15" x2="14" y2="5"/>
+    </g>
+
+    <path d="M-36 -12 L-12 -2 L-12 8 L-36 4 Z" fill="#4a4a4a"/>
+    <path d="M-14 14 L14 14 L0 28 Z" fill="#4a4a4a"/>
+  </g>
+
+  <text x="200" y="478" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="700" font-size="26" fill="#ffffff" letter-spacing="3">ASSASSIN</text>
+  <text x="200" y="518" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="400" font-size="15" fill="#d8d8d8" letter-spacing="2">PAY THREE COINS TO ASSASSINATE</text>
+</svg>

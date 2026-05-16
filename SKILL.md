@@ -531,7 +531,7 @@ This skill is the entry point. Deeper, on-demand material lives in `references/*
 | Cloudflare Workers/DO patterns, Hibernation API, Alarms, SQLite-backed migrations, GameRoom impl | [`references/durable-objects.md`](./references/durable-objects.md) | ✓ exists |
 | Better Auth configuration on the Worker, JWT for WS handshake, Google + Discord + magic link providers, Next.js rewrites topology | [`references/auth.md`](./references/auth.md) | ✓ exists |
 | Web client design system — Renaissance-court theme, shadcn/ui, color/type tokens, component conventions | [`references/design-system.md`](./references/design-system.md) | ✓ exists |
-| GSAP animation patterns (Flip plugin, useGSAP hook, performance) | `references/animations.md` | planned |
+| GSAP animation patterns (useGSAP hook, reduced motion, the implemented animations) | [`references/animations.md`](./references/animations.md) | ✓ exists |
 | TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula | [`references/rating.md`](./references/rating.md) | ✓ exists |
 
 Until a reference exists, this SKILL.md is the single source for that topic. Treat its sections as authoritative.
