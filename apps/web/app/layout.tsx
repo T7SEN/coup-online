@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Cinzel, EB_Garamond } from "next/font/google";
 import Script from "next/script";
+import { Footer } from "@/components/footer";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
@@ -46,11 +47,16 @@ export default function RootLayout({
       className={`${cinzel.variable} ${ebGaramond.variable}`}
     >
       <body className="antialiased">
-        {/* TooltipProvider — Radix tooltip context for the whole app (action
-            affordances in the room). Toaster — sonner host for transient
-            server errors. Both are client components; layout stays a Server
-            Component and passes `children` straight through. */}
-        <TooltipProvider>{children}</TooltipProvider>
+        {/* The app is a min-h-svh flex column — page content grows, the global
+            Footer pins to the bottom. The Navbar is added by (site)/layout.tsx
+            for site pages only; the game room stays chrome-free. TooltipProvider
+            gives Radix tooltip context app-wide; Toaster hosts sonner errors. */}
+        <TooltipProvider>
+          <div data-app-shell className="flex min-h-svh flex-col">
+            <div className="flex flex-1 flex-col">{children}</div>
+            <Footer />
+          </div>
+        </TooltipProvider>
         <Toaster />
         {cfAnalyticsToken && (
           <Script

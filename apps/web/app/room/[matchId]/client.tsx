@@ -14,9 +14,15 @@ import type {
   ServerMessage,
 } from '@coup-online/protocol'
 import { Logo } from '@/components/logo'
-import { AppearOnMount, MOTION_ENABLED, NO_REDUCED_MOTION } from '@/components/motion'
+import {
+  AppearOnMount,
+  burstParticles,
+  MOTION_ENABLED,
+  NO_REDUCED_MOTION,
+} from '@/components/motion'
 import { PlayerHand } from '@/components/player-hand'
 import { SeatCard } from '@/components/seat-card'
+import { TimerRing } from '@/components/timer-ring'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,6 +38,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { GAME_SERVER_WS } from '@/lib/config'
 import { logger } from '@/lib/logger'
 import { useIsClient } from '@/lib/use-is-client'
+import { ordinal } from '@/lib/utils'
 import { WsClient, type ConnectionState } from '@/lib/ws-client'
 
 // Minimal but-complete game UI. Shows the PlayerView, dispatches every action /
@@ -67,7 +74,7 @@ function prettyPhase(phase: PlayerView['phase']): string {
 // Full-viewport centered shell for the loading / error / no-token screens.
 function CenteredShell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="mx-auto flex min-h-svh max-w-md flex-col items-center justify-center gap-5 p-6 text-center">
+    <main className="mx-auto flex max-w-md flex-1 flex-col items-center justify-center gap-5 p-6 text-center">
       <Logo size="md" />
       {children}
     </main>
@@ -85,14 +92,9 @@ export function RoomClient({
   myPlayerId: string
 }) {
   // useIsClient = false during SSR + first client render (matching SSR HTML),
-  // then true after hydration. This prevents the SSR/CSR mismatch that arises
-  // from sessionStorage being null on the server but populated on the client.
+  // then true after hydration — a stable SSR-safe loading placeholder.
   // See lib/use-is-client.ts.
   const isClient = useIsClient()
-  const token =
-    isClient && typeof window !== 'undefined'
-      ? window.sessionStorage.getItem(`coup-online:token:${matchId}`)
-      : null
   const [state, setState] = useState<UiState>(null)
   // Fatal errors (non-recoverable connection close, missing token, etc.).
   // These replace the page with a "Back to lobby" affordance.
@@ -105,10 +107,20 @@ export function RoomClient({
   const wsRef = useRef<WsClient | null>(null)
 
   useEffect(() => {
-    if (!token) return
-    const url = `${GAME_SERVER_WS}/api/ws?matchId=${encodeURIComponent(matchId)}&token=${encodeURIComponent(token)}`
+    const wsBase = `${GAME_SERVER_WS}/api/ws?matchId=${encodeURIComponent(matchId)}`
     const ws = new WsClient({
-      url,
+      // Mint a fresh short-lived WS JWT for every connect / reconnect — never
+      // reuse a stale token, never persist it (SKILL.md § 5 — in memory only).
+      urlProvider: async () => {
+        try {
+          const res = await fetch('/api/ws-token', { method: 'POST' })
+          if (!res.ok) return null
+          const { token } = (await res.json()) as { token: string }
+          return `${wsBase}&token=${encodeURIComponent(token)}`
+        } catch {
+          return null
+        }
+      },
       reconnect: { enabled: true },
       onMessage(msg: ServerMessage) {
         switch (msg.type) {
@@ -183,14 +195,20 @@ export function RoomClient({
     })
     wsRef.current = ws
 
-    // Tick clock for timer countdown display.
-    const tick = setInterval(() => setNow(Date.now()), 250)
-
     return () => {
-      clearInterval(tick)
       ws.close()
     }
-  }, [matchId, token])
+  }, [matchId])
+
+  // Countdown clock — gated on an active phase timer. The 250 ms interval only
+  // runs while `timerEndsAt` is set; when no phase timer is live it is torn
+  // down and `now` stops updating (Part 2 audit — gate the clock on timerEndsAt).
+  const activeTimerEndsAt = state?.kind === 'game' ? state.view.timerEndsAt : null
+  useEffect(() => {
+    if (activeTimerEndsAt == null) return
+    const tick = setInterval(() => setNow(Date.now()), 250)
+    return () => clearInterval(tick)
+  }, [activeTimerEndsAt])
 
   const send = (msg: Parameters<WsClient['send']>[0]) => wsRef.current?.send(msg)
 
@@ -200,22 +218,6 @@ export function RoomClient({
     return (
       <CenteredShell>
         <p className="text-sm text-muted-foreground">Connecting…</p>
-      </CenteredShell>
-    )
-  }
-
-  if (!token) {
-    return (
-      <CenteredShell>
-        <Alert>
-          <AlertTitle>No token in this tab</AlertTitle>
-          <AlertDescription>
-            Go back to the lobby to create or join a match.
-          </AlertDescription>
-        </Alert>
-        <Button asChild variant="outline">
-          <Link href="/">Back to lobby</Link>
-        </Button>
       </CenteredShell>
     )
   }
@@ -419,6 +421,7 @@ function GamePanel({
   // Deal-in: when the board first mounts, the table eases in and the cards
   // stagger up into their seats. SKILL.md § 2 / references/animations.md.
   const tableRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   useGSAP(
     () => {
       const el = tableRef.current
@@ -429,9 +432,49 @@ function GamePanel({
         tl.from(el, { opacity: 0, scale: 0.97, duration: 0.4, ease: 'power2.out' })
         tl.from(
           el.querySelectorAll('[data-card]'),
-          { y: 26, opacity: 0, stagger: 0.05, duration: 0.4, ease: 'power2.out' },
+          {
+            y: 28,
+            opacity: 0,
+            rotateZ: -4,
+            stagger: 0.05,
+            duration: 0.42,
+            ease: 'power2.out',
+          },
           '-=0.15',
         )
+      })
+      return () => mm.revert()
+    },
+    { scope: tableRef },
+  )
+
+  // Pointer parallax — the table contents drift a few px against the cursor
+  // for a sense of depth. Pointer-only (skipped on touch / reduced motion).
+  useGSAP(
+    () => {
+      const table = tableRef.current
+      const content = contentRef.current
+      if (!MOTION_ENABLED || !table || !content) return
+      const mm = gsap.matchMedia()
+      mm.add(NO_REDUCED_MOTION, () => {
+        if (window.matchMedia('(pointer: coarse)').matches) return
+        const xTo = gsap.quickTo(content, 'x', { duration: 0.5, ease: 'power2.out' })
+        const yTo = gsap.quickTo(content, 'y', { duration: 0.5, ease: 'power2.out' })
+        const onMove = (e: PointerEvent) => {
+          const r = table.getBoundingClientRect()
+          xTo(((e.clientX - r.left) / r.width - 0.5) * 10)
+          yTo(((e.clientY - r.top) / r.height - 0.5) * 8)
+        }
+        const onLeave = () => {
+          xTo(0)
+          yTo(0)
+        }
+        table.addEventListener('pointermove', onMove)
+        table.addEventListener('pointerleave', onLeave)
+        return () => {
+          table.removeEventListener('pointermove', onMove)
+          table.removeEventListener('pointerleave', onLeave)
+        }
       })
       return () => mm.revert()
     },
@@ -463,7 +506,7 @@ function GamePanel({
               'radial-gradient(ellipse 70% 55% at 50% 40%, oklch(0.44 0.05 152 / 0.5), transparent 78%)',
           }}
         />
-        <div className="relative flex flex-col gap-5">
+        <div ref={contentRef} className="relative flex flex-col gap-5">
           <div className="flex flex-wrap justify-center gap-3">
             {opponents.map((seat) => (
               <SeatCard
@@ -588,16 +631,43 @@ function CourtCenter({
   timerSeconds: number | null
   turnName: string
 }) {
+  // Phase flash — the court pops on every phase change; entering a challenge
+  // window throws an oxblood particle puff for tension. references/animations.md.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useGSAP(
+    () => {
+      const el = rootRef.current
+      if (!MOTION_ENABLED || !el) return
+      const mm = gsap.matchMedia()
+      mm.add(NO_REDUCED_MOTION, () => {
+        gsap.fromTo(
+          el,
+          { scale: 0.97, opacity: 0.55 },
+          { scale: 1, opacity: 1, duration: 0.3, ease: 'power2.out' },
+        )
+        if (
+          view.phase === 'CHALLENGE_WINDOW' ||
+          view.phase === 'BLOCK_CHALLENGE_WINDOW'
+        ) {
+          burstParticles(el, { tone: 'oxblood', count: 10, spread: 64 })
+        }
+      })
+      return () => mm.revert()
+    },
+    { dependencies: [view.phase], scope: rootRef },
+  )
+
   return (
-    <div className="flex flex-col items-center gap-2 py-1 text-center">
+    <div
+      ref={rootRef}
+      className="relative flex flex-col items-center gap-2 py-1 text-center"
+    >
       <div className="flex items-center gap-2">
         <span className="font-display text-lg tracking-wide">
           {prettyPhase(view.phase)}
         </span>
-        {timerSeconds != null && (
-          <Badge variant={timerSeconds <= 5 ? 'destructive' : 'secondary'}>
-            {timerSeconds}s
-          </Badge>
+        {view.timerEndsAt != null && timerSeconds != null && (
+          <TimerRing endsAt={view.timerEndsAt} seconds={timerSeconds} />
         )}
       </div>
       <p className="text-sm text-table-foreground/70">
@@ -956,22 +1026,6 @@ function ExchangeBar({
   )
 }
 
-// English ordinal: 1 → "1st", 2 → "2nd", 3 → "3rd", 4 → "4th", 11 → "11th"…
-function ordinal(n: number): string {
-  const rem100 = n % 100
-  if (rem100 >= 11 && rem100 <= 13) return `${n}th`
-  switch (n % 10) {
-    case 1:
-      return `${n}st`
-    case 2:
-      return `${n}nd`
-    case 3:
-      return `${n}rd`
-    default:
-      return `${n}th`
-  }
-}
-
 function OverPanel({ winnerPlayerId, view }: { winnerPlayerId: string; view: PlayerView }) {
   const winner = view.seats.find((s) => s.playerId === winnerPlayerId)
   // Final standings: the survivor first, then eliminated players ranked by
@@ -984,55 +1038,93 @@ function OverPanel({ winnerPlayerId, view }: { winnerPlayerId: string; view: Pla
       .filter((s) => s.eliminationOrder != null)
       .sort((a, b) => (b.eliminationOrder ?? 0) - (a.eliminationOrder ?? 0)),
   ]
+
+  // Game-over flourish — the winner heading springs in with a gold burst and
+  // the standings stagger up. references/animations.md.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useGSAP(
+    () => {
+      const el = rootRef.current
+      if (!MOTION_ENABLED || !el) return
+      const mm = gsap.matchMedia()
+      mm.add(NO_REDUCED_MOTION, () => {
+        const heading = el.querySelector('[data-over-heading]')
+        const tl = gsap.timeline()
+        if (heading) {
+          tl.from(heading, {
+            scale: 0.8,
+            opacity: 0,
+            duration: 0.5,
+            ease: 'back.out(1.6)',
+          })
+        }
+        tl.from(
+          el.querySelectorAll('[data-standing]'),
+          { y: 14, opacity: 0, stagger: 0.07, duration: 0.35, ease: 'power2.out' },
+          '-=0.2',
+        )
+        burstParticles(el, { tone: 'gold', count: 24, spread: 140 })
+      })
+      return () => mm.revert()
+    },
+    { scope: rootRef },
+  )
+
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex flex-col items-center gap-1 text-center">
-          <span className="text-xs tracking-[0.3em] text-muted-foreground uppercase">
-            Game over
-          </span>
-          <h2 className="font-display text-2xl tracking-wide">
-            {winner?.isMe ? 'You won!' : `${winner?.displayName ?? '?'} won`}
-          </h2>
-        </div>
+    <div ref={rootRef} className="relative">
+      <Card>
+        <CardContent className="flex flex-col gap-4">
+          <div
+            data-over-heading
+            className="flex flex-col items-center gap-1 text-center"
+          >
+            <span className="text-xs tracking-[0.3em] text-muted-foreground uppercase">
+              Game over
+            </span>
+            <h2 className="font-display text-2xl tracking-wide">
+              {winner?.isMe ? 'You won!' : `${winner?.displayName ?? '?'} won`}
+            </h2>
+          </div>
 
-        <div className="flex flex-col gap-1.5">
-          <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
-            Final standings
-          </h3>
-          <ol className="flex flex-col gap-1.5">
-            {standings.map((s, i) => (
-              <li
-                key={s.playerId}
-                className={
-                  i === 0
-                    ? 'flex items-center justify-between gap-3 rounded-md border border-gold/55 bg-gold/10 px-3 py-2 text-sm'
-                    : 'flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-sm'
-                }
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="w-5 shrink-0 text-center font-display tabular-nums">
-                    {i + 1}
+          <div className="flex flex-col gap-1.5">
+            <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
+              Final standings
+            </h3>
+            <ol className="flex flex-col gap-1.5">
+              {standings.map((s, i) => (
+                <li
+                  key={s.playerId}
+                  data-standing
+                  className={
+                    i === 0
+                      ? 'flex items-center justify-between gap-3 rounded-md border border-gold/55 bg-gold/10 px-3 py-2 text-sm'
+                      : 'flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-sm'
+                  }
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="w-5 shrink-0 text-center font-display tabular-nums">
+                      {i + 1}
+                    </span>
+                    <span dir="auto" className="truncate font-medium">
+                      {s.displayName}
+                    </span>
+                    {s.isMe && (
+                      <span className="shrink-0 text-xs text-muted-foreground">(you)</span>
+                    )}
                   </span>
-                  <span dir="auto" className="truncate font-medium">
-                    {s.displayName}
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {i === 0 ? 'winner' : `${ordinal(i + 1)} place`}
                   </span>
-                  {s.isMe && (
-                    <span className="shrink-0 text-xs text-muted-foreground">(you)</span>
-                  )}
-                </span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {i === 0 ? 'winner' : `${ordinal(i + 1)} place`}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </div>
+                </li>
+              ))}
+            </ol>
+          </div>
 
-        <Button asChild size="lg" className="w-full">
-          <Link href="/">Play again</Link>
-        </Button>
-      </CardContent>
-    </Card>
+          <Button asChild size="lg" className="w-full">
+            <Link href="/">Play again</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
   )
 }

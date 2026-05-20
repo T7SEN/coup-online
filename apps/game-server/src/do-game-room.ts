@@ -189,6 +189,12 @@ export class GameRoom extends DurableObject<Env> {
       await this.handleMessage(userId, validation.data)
     } catch (err) {
       if (err instanceof IllegalActionError) {
+        // SKILL.md § 3.2 — a challenge that lands outside its window lost the
+        // race (or the window already closed). It is silently dropped: the
+        // loser learns only by absence of effect, never via an error toast.
+        if (validation.data.type === 'challenge' && err.code === 'wrong_phase') {
+          return
+        }
         this.sendTo(ws, { type: 'error', code: err.code, message: err.message })
       } else {
         logger.error('ws message handler failed', err, { matchId: this.matchId })
@@ -237,9 +243,12 @@ export class GameRoom extends DurableObject<Env> {
     }
   }
 
-  async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
+  async webSocketError(_ws: WebSocket, error: unknown): Promise<void> {
+    // Log only. The runtime fires webSocketClose() for this socket immediately
+    // after webSocketError(); that handler owns the disconnect bookkeeping
+    // (mark seat disconnected, stamp the 30s forfeit deadline). Calling it here
+    // too would double-process the disconnect.
     logger.error('websocket transport error', error, { matchId: this.matchId })
-    await this.webSocketClose(ws)
   }
 
   // ==========================================================================
@@ -357,12 +366,24 @@ export class GameRoom extends DurableObject<Env> {
       delete state.disconnects[userId]
     } else if (state.lobbyPhase === 'GAME_OVER') {
       // Read-only post-game view. Seated players can reconnect to see the
-      // final state; non-seated connections are rejected.
+      // final result; non-seated connections are rejected.
       const seat = state.game?.seats.find((s) => s.playerId === userId)
-      if (!seat) {
+      if (!seat || !state.game) {
         ws.close(CLOSE_MATCH_IN_PROGRESS, 'Match has ended')
         return
       }
+      // The one-time game-end broadcast + D1 write already ran in
+      // finalizeGameEnd; a reconnect must NOT re-run afterMutation (it would
+      // re-persist to D1). Replay the final result to this socket alone.
+      const winner = state.game.seats.find((s) => s.isAlive)
+      if (winner) {
+        this.sendTo(ws, {
+          type: 'game-end',
+          winnerPlayerId: winner.playerId,
+          finalView: buildPlayerView(state.game, userId),
+        })
+      }
+      return
     }
 
     await this.afterMutation(state)

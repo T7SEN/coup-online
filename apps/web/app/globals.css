@@ -108,3 +108,39 @@
     );
   }
 }
+
+/* Home-page section snapping. app/(site)/page.tsx adds `snap-home` to <html>
+   while it is mounted, so snapping never leaks onto the leaderboard / profile
+   / room pages. Every section is min-h-svh — never shorter than the viewport —
+   so `mandatory` snaps firmly without ever trapping the scroll: a section
+   taller than the viewport stays freely scrollable while the viewport is
+   inside it. */
+html.snap-home {
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+}
+
+/* On the home page the footer is rendered inside the last section so it snaps
+   in as part of that screen. Hide the global root-layout footer there to avoid
+   rendering it twice. */
+html.snap-home [data-app-shell] > footer {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.snap-home {
+    scroll-behavior: auto;
+  }
+}
+
+/* Sentry User Feedback widget (instrumentation-client.ts) — move it to the
+   bottom-left so its floating actor button doesn't sit on top of our
+   bottom-right ScrollToTop control. `#sentry-feedback` is the widget's
+   light-DOM host; the widget positions the actor button (and dialog) with
+   `inset: var(--actor-inset)` / `var(--dialog-inset)`, both derived from
+   `--inset` — default `auto 0 0 auto` (bottom-right). `auto auto 0 0` is
+   top/right `auto`, bottom/left `0` → bottom-left. The custom property,
+   inherited into the shadow DOM, is the only supported hook here. */
+#sentry-feedback {
+  --inset: auto auto 0 0;
+}

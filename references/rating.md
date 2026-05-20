@@ -169,7 +169,7 @@ winner=1 / everyone-else-tied-2 approximation.
 
 ## Dependencies
 
-- `ts-trueskill` ^4 — the actual TrueSkill implementation (v4.2.3 currently)
+- `ts-trueskill` ^5 — the actual TrueSkill implementation (v5.1.0 currently)
 
 `ts-trueskill` itself depends on `ts-gaussian`. Both pure-TypeScript, no
 native binaries — Workers-safe.
@@ -196,6 +196,6 @@ native binaries — Workers-safe.
 - **Finishing-position derivation:** `computeFinishingPositions` in `packages/game-logic/src/win-condition.ts` (tested in `win-condition.test.ts`)
 - **Why TrueSkill is the only legal pick (no Elo / Glicko-2):** [`anti-hallucination.md`](./anti-hallucination.md) — Rating section
 - **The "MMR write is the last step of endGame()" rule:** [`coding-patterns.md`](./coding-patterns.md) § 16; [`SKILL.md`](../SKILL.md) § 5
-- **Persistence target (D1 tables: `users`, `match_players`, `mmr_history`):** planned `references/db-schema.md` + `packages/db/` (not yet implemented)
+- **Persistence layer (D1 tables `match`, `match_player`, `mmr_history`, `user.mu/sigma`):** [`db-schema.md`](./db-schema.md) — implemented in `packages/db/`
 - **Source:** `packages/rating/src/` — `constants.ts`, `types.ts`, `rate.ts`, `display.ts`
 - **Tests:** `packages/rating/test/` — `rate.test.ts` (16 tests), `display.test.ts` (6 tests)

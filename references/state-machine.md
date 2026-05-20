@@ -259,10 +259,6 @@ include verbatim in `server-messages::error`:
 - **Eliminated players keep their coins.** No mechanical impact (they can't act,
   can't be targeted, can't block), but the coin total on the table includes dead
   players' piles. Standard Coup rules don't strictly require zeroing.
-- **Tied finishing positions at game end.** v1 ranks the winner as position 1
-  and everyone else as position 2 (TrueSkill handles ties correctly). True
-  elimination-order ranking needs a per-seat `eliminatedAtTurn` field —
-  future pass.
 
 `influenceLossPlayerId` IS exposed in `PlayerView` so clients can gate the
 InfluencePickBar to the right player. SKILL.md § 3.1 is preserved — only the

@@ -21,6 +21,11 @@ declare global {
       // (typical local dev) the Sentry SDK initializes in a disabled state
       // and every capture call no-ops.
       SENTRY_DSN_WORKER?: string
+      // R2 bucket for user-uploaded avatars (`[[r2_buckets]]` in
+      // wrangler.toml). Declared here rather than via `wrangler types`: the
+      // installed wrangler regenerates worker-configuration.d.ts in a newer
+      // format that no longer merges with this `Cloudflare.Env` augmentation.
+      AVATARS: R2Bucket
     }
   }
 }

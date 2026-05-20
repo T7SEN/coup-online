@@ -72,6 +72,18 @@ describe('checkWinner', () => {
     checkWinner(state)
     expect(state.seats.map((s) => s.isAlive)).toStrictEqual(aliveBefore)
   })
+
+  it('stays null until exactly one survivor across 4-6 player tables', () => {
+    for (const n of [4, 5, 6]) {
+      const seats = Array.from({ length: n }, (_, i) => seat(`p${i}`, true))
+      const state = makeState(seats)
+      for (let k = 0; k < n - 1; k++) {
+        expect(checkWinner(state)).toBeNull()
+        state.seats[k].isAlive = false
+      }
+      expect(checkWinner(state)).toBe(`p${n - 1}`)
+    }
+  })
 })
 
 describe('computeFinishingPositions', () => {

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@coup-online/web", "dev"],
+      "port": 6769,
+      "autoPort": true
+    }
+  ]
+}

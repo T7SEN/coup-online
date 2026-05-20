@@ -151,8 +151,8 @@ pnpm --filter @coup-online/game-server exec wrangler secret put SENTRY_DSN_WORKE
 ```
 
 Wrangler prompts for the value, stores it as a Workers secret, never echoes
-it back. Set the same `WS_SIGNING_SECRET` value on the Next.js side (Vercel
-env vars).
+it back. `WS_SIGNING_SECRET` lives on the Worker only — Next.js neither signs
+nor verifies WS tokens, so no auth secret is set on Vercel.
 
 ### Step 5. Deploy
 

@@ -402,8 +402,9 @@ At GAME_OVER, `finalizeGameEnd` calls `persistMatchResult` from
    creates the row at sign-in, and SKILL.md § 1 forbids guest play, so the
    row always exists in practice).
 2. Snapshots pre-match mu/sigma from those rows.
-3. Builds `SeatResult[]`. Winner finishes at position 1; everyone else is
-   tied at 2 (TrueSkill handles tied ranks).
+3. Builds `SeatResult[]` with the true N-way finishing order from
+   `computeFinishingPositions` — distinct positions `1..N` derived from each
+   seat's `eliminationOrder` (the lone survivor is 1st).
 4. Calls `rateMatch` → `RatingDelta[]`.
 5. `insertMatchResult(db, { match, players, history })` writes atomically via
    D1 `db.batch()`.
@@ -460,11 +461,13 @@ performs the actual game-state mutation:
 - Drop the player from `influenceLossQueue`.
 - If they were the Ambassador actor, return the 4-card pool to the deck and
   null `exchangePool`.
-- If they were the actor of a pending action or block, evaporate the
-  interaction. Conservative v1 choice — disconnect mid-block cancels the
-  parent action too. Standard Coup doesn't legislate this; a future rule
-  could resolve the action as "no block declared" instead.
-- Phase transitions to next picker (INFLUENCE_LOSS), to the actor
+- If they were the **actor** of a pending action, the action and any pending
+  block evaporate. If they were the **blocker**, the block is withdrawn and the
+  original action resolves as if it had never been blocked — Foreign Aid pays
+  out, Steal / Assassinate fizzle (their blocker is the now-eliminated target).
+  v1 audit, Finding B.
+- Phase transitions to next picker (INFLUENCE_LOSS), to BLOCK_WINDOW (a proven
+  challenge of a blockable action was awaiting its block window), to the actor
   (EXCHANGE_SELECTION when forfeitee wasn't the actor), or to next-turn /
   GAME_OVER via `concludeTurn`.
 

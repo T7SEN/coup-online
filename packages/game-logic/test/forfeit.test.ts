@@ -147,15 +147,37 @@ describe('forfeitPlayer', () => {
     expect(state.pendingBlock).toBeNull()
   })
 
-  it('evaporates pendingBlock + parent action when forfeitee is the blocker', () => {
+  it('resolves the original action as unblocked when the blocker forfeits (Finding B)', () => {
     const state = makeState([seat('p0'), seat('p1'), seat('p2')], {
       phase: 'BLOCK_CHALLENGE_WINDOW',
       pendingAction: { actorPlayerId: 'p0', action: { kind: 'ForeignAid' } },
       pendingBlock: { blockerPlayerId: 'p1', claimedCharacter: 'Duke' },
     })
+    const before = state.seats[0].coins
     forfeitPlayer(state, 'p1')
     expect(state.pendingBlock).toBeNull()
     expect(state.pendingAction).toBeNull()
+    // The block is withdrawn → Foreign Aid resolves: the actor receives +2.
+    expect(state.seats[0].coins).toBe(before + 2)
+    expect(state.phase).toBe('AWAITING_ACTION')
+  })
+
+  it('a Steal whose target (the blocker) forfeits fizzles — no transfer', () => {
+    const state = makeState(
+      [seat('p0', { coins: 2 }), seat('p1', { coins: 5 }), seat('p2')],
+      {
+        phase: 'BLOCK_CHALLENGE_WINDOW',
+        pendingAction: {
+          actorPlayerId: 'p0',
+          action: { kind: 'Steal', targetPlayerId: 'p1' },
+        },
+        pendingBlock: { blockerPlayerId: 'p1', claimedCharacter: 'Captain' },
+      },
+    )
+    forfeitPlayer(state, 'p1')
+    expect(state.seats[0].coins).toBe(2) // nothing stolen from an eliminated target
+    expect(state.pendingAction).toBeNull()
+    expect(state.pendingBlock).toBeNull()
   })
 
   it('flips to GAME_OVER when forfeit eliminates the second-to-last player', () => {

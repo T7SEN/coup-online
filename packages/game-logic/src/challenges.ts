@@ -91,10 +91,20 @@ function resolveActionChallenge(
   )
 
   if (matchingIdx !== -1) {
-    // PROVEN: action effect applies; challenger loses. For Assassinate proven,
-    // applyActionEffect queues the target loss too — order: challenger then target.
+    // PROVEN — claimant holds the card: it returns to the deck, reshuffles, and
+    // a replacement is drawn; the challenger loses an influence.
     replaceCardWithDraw(state, claimant, matchingIdx)
     state.influenceLossQueue.push(challengerPlayerId)
+    // per SKILL.md § 3.2 phase 3 — after a successful reveal a blockable action
+    // (Steal, Assassinate) still passes through BLOCK_WINDOW. Defer the effect
+    // and flag the resume; applyInfluencePick advances to BLOCK_WINDOW once the
+    // challenger's loss is picked. Tax / Exchange are unblockable — resolve now.
+    if (claim.kind === 'Steal' || claim.kind === 'Assassinate') {
+      state.blockWindowPending = true
+      state.phase = 'INFLUENCE_LOSS'
+      state.timerEndsAt = null
+      return state
+    }
     applyActionEffect(state, claim, claimantId)
     return resolveAfterEffects(state)
   }

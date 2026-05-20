@@ -15,8 +15,8 @@ the D1 binding — no HTTP-DB bridge (see [`auth.md`](./auth.md)).
 | Piece | Choice | Why |
 |---|---|---|
 | Database | Cloudflare D1 (SQLite) | Free 5 GB, Workers-native binding (SKILL.md § 2 / § 6) |
-| ORM | `drizzle-orm` v0.36 | Edge-compatible, type-safe, no Prisma (SKILL.md § 6) |
-| Migration tool | `drizzle-kit` v0.28 | Generates SQL from schema diff; deploy via wrangler |
+| ORM | `drizzle-orm` ^0.45 | Edge-compatible, type-safe, no Prisma (SKILL.md § 6) |
+| Migration tool | `drizzle-kit` ^0.31 | Generates SQL from schema diff; deploy via wrangler |
 | Migration apply | `wrangler d1 migrations apply` | Native Cloudflare D1 tooling |
 | SQL dialect | SQLite (D1) | No Postgres-isms — see SKILL.md § 6 |
 

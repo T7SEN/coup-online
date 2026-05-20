@@ -43,6 +43,14 @@ export const user = sqliteTable('user', {
   // Project-side display name. May be NULL on first sign-in; user picks one
   // during onboarding (apps/web/(app)/profile flow, future).
   displayName: text('displayName'),
+  // Profile crest customization. `profileColor` is a key into a fixed preset
+  // palette (PROFILE_COLORS in apps/web/.../profile-colors.ts) — the banner
+  // strip behind the avatar renders in that color. NOT NULL so the crest
+  // always has a backdrop. `profileImage` is groundwork for a future
+  // supporter perk: a custom banner image URL. NULL for everyone today; when
+  // set it takes precedence over `profileColor`.
+  profileColor: text('profileColor').notNull().default('parchment'),
+  profileImage: text('profileImage'),
   // TrueSkill rating. Defaults match SKILL.md § 3.6.
   mu: real('mu').notNull().default(25),
   sigma: real('sigma').notNull().default(25.0 / 3.0),

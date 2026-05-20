@@ -40,3 +40,11 @@ database_name = "coup-online-db"
 database_id = "4420c671-5adb-4a9b-8c7d-24bc031946cb"
 # Drizzle migrations live in packages/db; wrangler d1 migrations apply uses this path.
 migrations_dir = "../../packages/db/drizzle/migrations"
+
+# R2 bucket — user-uploaded avatars (SKILL.md § 2). R2 has a permanent free
+# tier (10 GB storage), so this stays inside the zero-dollar v1 budget. Create
+# the bucket once before the first deploy:
+#   pnpm --filter @coup-online/game-server exec wrangler r2 bucket create coup-online-avatars
+[[r2_buckets]]
+binding = "AVATARS"
+bucket_name = "coup-online-avatars"

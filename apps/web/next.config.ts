@@ -1,11 +1,15 @@
 import { withSentryConfig } from '@sentry/nextjs'
 import type { NextConfig } from 'next'
 
-// Better Auth lives on the Worker (SKILL.md § 2 — D1 stays Worker-owned).
-// Browsers hit /api/auth/* and /api/ws-token on the Vercel origin so cookies
-// scope to that origin; Next.js then proxies the request server-side to the
-// Worker. Set-Cookie headers from the Worker flow back through this rewrite
-// and apply to the browser's view of the Vercel origin.
+// D1 is Worker-owned (SKILL.md § 2), so every server route the browser needs
+// is proxied to the Worker. Browsers hit these on the Vercel origin (cookies
+// scope there); Next.js proxies them server-side, and Set-Cookie headers from
+// the Worker flow back through. Routes:
+//   /api/auth/*                  — Better Auth.
+//   /api/ws-token                — the short-lived WS JWT.
+//   /api/leaderboard, /api/me/*  — read-only D1-backed data (leaderboard +
+//                                  the signed-in user's profile).
+//   /api/players/*               — leaderboard player search (browser-side).
 const nextConfig: NextConfig = {
   async rewrites() {
     const target =
@@ -13,6 +17,12 @@ const nextConfig: NextConfig = {
     return [
       { source: '/api/auth/:path*', destination: `${target}/api/auth/:path*` },
       { source: '/api/ws-token', destination: `${target}/api/ws-token` },
+      { source: '/api/leaderboard', destination: `${target}/api/leaderboard` },
+      { source: '/api/me/:path*', destination: `${target}/api/me/:path*` },
+      {
+        source: '/api/players/:path*',
+        destination: `${target}/api/players/:path*`,
+      },
     ]
   },
 }

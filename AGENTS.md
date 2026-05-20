@@ -26,6 +26,8 @@ Read in this order:
    - [`refusal-catalog.md`](./references/refusal-catalog.md) — typical request phrasings + drop-in refusal templates. Read when about to refuse something.
    - [`code-style.md`](./references/code-style.md) — TypeScript conventions, naming, imports, comments, tests, error handling, formatting, configs. Read when writing code in an unfamiliar area.
    - [`deployment.md`](./references/deployment.md) — Vercel + Cloudflare deploy workflow, env vars, secrets, free-tier limits, monetization migration. Read when touching deploy config or secrets.
+   - [`design-system.md`](./references/design-system.md) — the Renaissance-court visual system: shadcn/ui, colour / type tokens, component conventions. Read when building or restyling UI.
+   - [`animations.md`](./references/animations.md) — the GSAP motion layer: `useGSAP`, the `Glow` / particle / timer-ring primitives, the two-faced flip card. Read when touching animations.
 3. **`memory/MEMORY.md`** — user-specific working rules (loaded automatically from `~/.claude/projects/.../memory/`). Currently contains the documentation-discipline rule and the three-gate verification rule.
 
 ## Mandatory verification on every code change
@@ -76,7 +78,7 @@ For the full deploy / secrets / env-var workflow, see [`references/deployment.md
 
 | Path | What lives here | Deep reference |
 |---|---|---|
-| `apps/web/` | Next.js 16 frontend (Vercel Hobby) — lobby page + `room/[matchId]` with WS-driven game UI; typed WS client in `lib/ws-client.ts` | — |
+| `apps/web/` | Next.js 16 frontend (Vercel Hobby) — lobby page + `room/[matchId]` with WS-driven game UI; typed WS client in `lib/ws-client.ts` | [`design-system.md`](./references/design-system.md), [`animations.md`](./references/animations.md) |
 | `apps/game-server/` | Cloudflare Worker + Hono router (`/health`, `/api/auth/*`, `/api/ws-token`, `/api/ws`) + Better Auth (Drizzle adapter → D1) + GameRoom DO (full impl) + MatchmakingQueue / RoomCodeRegistry stubs + D1 binding | [`durable-objects.md`](./references/durable-objects.md), [`state-machine.md`](./references/state-machine.md), [`auth.md`](./references/auth.md) |
 | `packages/protocol/` | Zod schemas for every WebSocket message + `PlayerView` type | [`state-machine.md`](./references/state-machine.md) for the contract |
 | `packages/game-logic/` | Pure Coup rules — actions, challenges, blocks, state machine, win condition | [`state-machine.md`](./references/state-machine.md), [`coding-patterns.md`](./references/coding-patterns.md) |
@@ -95,9 +97,10 @@ For the full deploy / secrets / env-var workflow, see [`references/deployment.md
 | Add a new dependency | [`anti-hallucination.md`](./references/anti-hallucination.md) checklist at the bottom; SKILL.md § 2 |
 | Refuse a request | [`refusal-catalog.md`](./references/refusal-catalog.md), SKILL.md § 7 |
 | Write a new file | [`code-style.md`](./references/code-style.md), nearest sibling file as a template |
+| Build / restyle UI or add animations | [`design-system.md`](./references/design-system.md), [`animations.md`](./references/animations.md) |
 | Set up a new workspace | [`code-style.md`](./references/code-style.md) (configs section), [`coding-patterns.md`](./references/coding-patterns.md) § 23 (eslint) |
 | Deploy / set secrets | [`deployment.md`](./references/deployment.md) |
-| Implement a DO | SKILL.md § 3.3, `apps/game-server/src/do-*.ts` stubs as templates |
+| Implement a DO | SKILL.md § 3.3; `do-game-room.ts` is the full reference impl, `do-matchmaking.ts` / `do-room-codes.ts` are 501 stubs |
 
 ## High-frequency refusal triggers
 

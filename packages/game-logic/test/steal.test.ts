@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { CardKind } from '@coup-online/protocol'
-import { applyBlock, applyBlockWindowTimeout } from '../src/blocks'
+import {
+  applyBlock,
+  applyBlockChallengeWindowTimeout,
+  applyBlockWindowTimeout,
+} from '../src/blocks'
 import { applyChallenge, applyChallengeWindowTimeout } from '../src/challenges'
 import {
   applyInfluencePick,
@@ -158,16 +162,45 @@ describe('Steal coin transfer cap', () => {
 
 // --- Challenge paths --------------------------------------------------------
 
+// SKILL.md § 3.2 phase 3 — a proven challenge of a blockable action does NOT
+// resolve the action; the challenger loses an influence and the action then
+// passes through its BLOCK_WINDOW.
 describe('Steal proven challenge', () => {
-  it('challenger loses, transfer happens, deck multiset preserved', () => {
+  it('challenger loses an influence, then the action passes to BLOCK_WINDOW', () => {
+    const state = setupSteal(true, 5)
+    applyStealAction(state, 'p0', 'p1')
+    applyChallenge(state, 'p1') // p1 challenges p0's Captain claim — proven
+    expect(state.influenceLossQueue[0]).toBe('p1')
+    expect(state.seats[0].coins).toBe(2) // no transfer yet
+    applyInfluencePick(state, 'p1', 0)
+    expect(state.phase).toBe('BLOCK_WINDOW')
+    expect(state.seats[1].influence.some((i) => i.status === 'revealed')).toBe(true)
+    expect(state.seats[0].coins).toBe(2) // still no transfer
+  })
+
+  it('the steal resolves once the post-challenge BLOCK_WINDOW expires unblocked', () => {
     const state = setupSteal(true, 5)
     applyStealAction(state, 'p0', 'p1')
     applyChallenge(state, 'p1')
-    expect(state.influenceLossQueue[0]).toBe('p1')
     applyInfluencePick(state, 'p1', 0)
+    applyBlockWindowTimeout(state) // no block → steal resolves
     expect(state.seats[0].coins).toBe(4)
     expect(state.seats[1].coins).toBe(3)
+    expect(state.phase).toBe('AWAITING_ACTION')
     expect(countByKind(allCardKinds(state))).toStrictEqual(countByKind(DECK))
+  })
+
+  it('the target may still block after a proven challenge', () => {
+    const state = setupSteal(true, 5)
+    applyStealAction(state, 'p0', 'p1')
+    applyChallenge(state, 'p1')
+    applyInfluencePick(state, 'p1', 0)
+    expect(state.phase).toBe('BLOCK_WINDOW')
+    applyBlock(state, 'p1', 'Captain')
+    expect(state.phase).toBe('BLOCK_CHALLENGE_WINDOW')
+    applyBlockChallengeWindowTimeout(state) // block stands
+    expect(state.seats[0].coins).toBe(2) // steal blocked — no transfer
+    expect(state.phase).toBe('AWAITING_ACTION')
   })
 })
 

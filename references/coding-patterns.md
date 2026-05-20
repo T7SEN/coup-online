@@ -256,7 +256,7 @@ wrapped in `<Suspense>` at the page level, or the build will fail.
 **Pattern:**
 
 ```tsx
-// app/room/[code]/page.tsx
+// app/room/[matchId]/page.tsx
 import { Suspense } from 'react'
 import { RoomClient } from './room-client'
 
@@ -383,7 +383,7 @@ Future-proofs i18n by letting the browser detect RTL/LTR per input.
 
 **Spec:** SKILL.md § 5.
 
-**Pattern (frontend, `apps/web/instrumentation.client.ts`):**
+**Pattern (frontend, `apps/web/instrumentation-client.ts`):**
 
 ```ts
 import * as Sentry from '@sentry/nextjs'
@@ -409,8 +409,12 @@ Both runtimes share the **same** 5K-errors/month bucket — keep noise low.
 
 **Spec:** SKILL.md § 5.
 
-Use a `logger` utility that no-ops in production and routes to Sentry
-breadcrumbs in development.
+Use the `logger` utility (`apps/web/lib/logger.ts`, `apps/game-server/src/logger.ts`)
+— never raw `console.*` at call sites. `logger.debug` is dev-console-only (a
+no-op in production, never shipped to Sentry); `logger.info` / `warn` / `error`
+route to the Sentry Logs product, and `logger.error(msg, err)` additionally
+opens a Sentry Issue. Pass structured `attributes` (primitives only). The
+logger module itself is the one sanctioned place for `console.*`.
 
 ---
 
@@ -427,25 +431,27 @@ fails, retry; don't roll back the match data.
 
 **Spec:** SKILL.md § 5.
 
-**Issuance** (Next.js Route Handler, `app/api/ws-token/route.ts`):
+**Issuance** — a Hono route on the **Worker** (`apps/game-server/src/index.ts`),
+not on Next.js. The browser POSTs `/api/ws-token` on the Vercel origin; Next.js's
+`rewrites()` proxies it to the Worker. The Worker owns signing and verification;
+Next.js is a transparent proxy (SKILL.md § 5):
 
 ```ts
-import { SignJWT } from 'jose'
-import { auth } from '@/lib/auth'
-
-export async function GET() {
-  const session = await auth()
-  if (!session?.user) return new Response('Unauthorized', { status: 401 })
-  const token = await new SignJWT({
+// apps/game-server/src/index.ts
+app.post('/api/ws-token', async (c) => {
+  const auth = createAuth(c.env)
+  const session = await auth.api.getSession({ headers: c.req.raw.headers })
+  if (!session) return c.text('Unauthorized', 401)
+  const token = await signWsToken(c.env.WS_SIGNING_SECRET, {
     userId: session.user.id,
     displayName: session.user.name,
   })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setExpirationTime('5m')
-    .sign(new TextEncoder().encode(process.env.WS_SIGNING_SECRET))
-  return Response.json({ token })
-}
+  return c.json({ token })
+})
 ```
+
+`signWsToken` (`apps/game-server/src/ws-token.ts`) wraps `jose`'s `SignJWT` —
+HS256, 5-minute expiry.
 
 **Verification** (Worker, on WS upgrade):
 
@@ -464,8 +470,8 @@ try {
 }
 ```
 
-`WS_SIGNING_SECRET` is shared between Next.js and the Worker (set in both
-environments). HS256, 5-minute expiry.
+`WS_SIGNING_SECRET` lives on the **Worker only** — Next.js neither signs nor
+verifies WS tokens. HS256, 5-minute expiry.
 
 ---
 
@@ -479,7 +485,7 @@ Protects against cross-origin WebSocket hijacking.
 
 ```ts
 const ALLOWED_ORIGINS = new Set([
-  'https://coup.example.com',
+  'https://coups.app',
   'http://localhost:3000',
 ])
 

@@ -26,7 +26,12 @@ export interface WsClientReconnect {
 }
 
 export interface WsClientOptions {
-  readonly url: string
+  // Builds the full WS URL (including a freshly-minted short-lived token) for
+  // each connection attempt. Called on every connect AND every reconnect, so
+  // the 5-minute WS JWT is always fresh and never goes stale across a long
+  // match. Returns null if a token can't be obtained (e.g. the session
+  // expired) — treated as a fatal auth failure.
+  readonly urlProvider: () => Promise<string | null>
   readonly onMessage: (msg: ServerMessage) => void
   readonly onOpen?: () => void
   // Fires after the underlying WebSocket closes. `willReconnect` indicates
@@ -55,7 +60,7 @@ export class WsClient {
   private disposed = false
 
   constructor(private readonly opts: WsClientOptions) {
-    this.connect()
+    void this.connect()
   }
 
   send(msg: ClientMessage): void {
@@ -104,9 +109,21 @@ export class WsClient {
     this.opts.onStateChange?.(next)
   }
 
-  private connect(): void {
+  private async connect(): Promise<void> {
     if (this.disposed) return
-    const ws = new WebSocket(this.opts.url)
+    // Mint a FRESH connection URL (with a freshly-signed short-lived token) on
+    // every attempt, including reconnects — so the 5-minute WS JWT never goes
+    // stale across a long match (SKILL.md § 3.5 / § 5).
+    const url = await this.opts.urlProvider()
+    if (this.disposed) return
+    if (url == null) {
+      // Could not obtain a session token — an auth failure, not a transient
+      // drop. Surface it like the DO's 4001 invalid-token close.
+      this.opts.onClose?.(4001, 'Could not obtain a session token', false)
+      this.setState('closed')
+      return
+    }
+    const ws = new WebSocket(url)
     this.ws = ws
     ws.addEventListener('open', () => {
       if (this.disposed) return
@@ -166,7 +183,7 @@ export class WsClient {
     const delay = Math.min(cap, base * 2 ** (this.attempts - 1))
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      this.connect()
+      void this.connect()
     }, delay)
   }
 }

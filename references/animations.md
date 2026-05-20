@@ -14,7 +14,7 @@ stack) and [`design-system.md`](./design-system.md). Lives in `apps/web`.
 
 ## Stack
 
-- **`gsap`** (core — the `Flip` plugin ships inside the package) + **`@gsap/react`**
+- **`gsap`** (core — the `Flip` and `ScrollTrigger` plugins ship inside the package) + **`@gsap/react`**
   for the **`useGSAP`** hook. GSAP is 100% free (Webflow stewardship, April 2025);
   no paid plugins. **No Framer Motion / `motion`** (SKILL.md § 2).
 - Every animation goes through **`useGSAP`** — never a raw `useEffect` + `gsap`.
@@ -54,6 +54,17 @@ desync or block the game.
 | Card flip on reveal (true two-faced 180° flip) | `CardFace` (`influence-card.tsx`) | a card's status becomes `revealed` (hidden → revealed) |
 | Elimination (slump + ash particle burst) | `SeatCard`, `PlayerHand` | a seat's `isAlive` becomes false |
 | Panel entrance | `AppearOnMount` wrapping each action bar | the bar mounts (phase change) |
+| Hero atmospheric scene — atmosphere fades in, the manuscript frame settles + corner lozenges pop, the headline rises word by word; motes drift (ambient) and cursor parallax drifts the frame + mote layers | `HeroSection` (`components/site/`) | section mounts; ambient + parallax run after the entrance |
+| "How it plays" animated turn demo — a looping stage plays out a turn (claim → challenge → influence lost: card lifts + glows, 2D `scaleX` flip-reveal, then dims + tilts away); a subtle backing panel fades in behind whichever beat is active | `HowItPlaysSection` | section scrolls into view (ScrollTrigger), loops, pauses off-screen |
+| "The court" entrance (card deal — cards burst from centre with a spin + overshoot); the pointed-at card spotlights and tilts 3D toward the cursor | `TheCourtSection` | section scrolls into view (ScrollTrigger) |
+| Closing entrance (vignette fades in, kicker drops, the monumental heading zoom-settles, lede rises, button pops, footer rises) | `ClosingSection` | section scrolls into view (ScrollTrigger) |
+| Section reveal (fade + rise) — Rules + Privacy pages | `RevealSection` (`components/site/`) | a section scrolls into view (ScrollTrigger) |
+| Play-hub entrance — header reveals, then the three option cards are "dealt" onto the table (drop + rotate + settle overshoot), then their icon medallions pop | `PlayHub` (`app/(site)/play/`) | page mounts |
+| 404 entrance — vignette fades, the "404" card pops in, its corner lozenges pop, then the copy + buttons rise | `not-found.tsx` (`app/`) | the 404 page mounts |
+| Support-page entrance — header reveals, the privileges gallery rises, then the close lifts; flipping a privilege card slides the next one in (direction-aware) | `SupportContent` (`app/(site)/support/`) | page mounts; the gallery card on every index change |
+| About-page entrance — header reveals, the at-a-glance facts pop in, the story cards rise one by one, then the close lifts | `AboutContent` (`app/(site)/about/`) | page mounts |
+| Hall of Patrons — the honour roll. A vertical parchment scroll with twin gold rod-caps; the scroll body is scrollable inside itself so the whole page fits in the viewport (slim gold-tinted webkit scrollbar, top + bottom fade-edge mask). Entrance: header reveals (kicker → title → rule → lede), the scroll unfurls from the top rod (scaleY from origin top), the rod caps + finials pop in, the ten entries stagger in line by line, then the close lifts. Ambient (continuous): the four rod-cap finials twinkle out-of-phase. Hover (or keyboard-focus) an entry: the numeral and name gild, a flourish line + lozenge unfurl on the right, and the ruling line beneath gilds. | `HallContent` (`app/(site)/patrons/`) | page mounts; ambient loops after entrance |
+| Page transition (cross-fade) | `app/(site)/template.tsx` | every navigation within the `(site)` group |
 | Game-over flourish (heading spring, gold burst, standings stagger) | `OverPanel` (`client.tsx`) | the over-panel mounts |
 
 ## Motion primitives — `components/motion.tsx`
@@ -119,4 +130,5 @@ desync or block the game.
 - **The visual layer:** [`design-system.md`](./design-system.md)
 - **Source:** `apps/web/components/motion.tsx`, `timer-ring.tsx`,
   `influence-card.tsx`, `seat-card.tsx`, `player-hand.tsx`; the `useGSAP` calls
-  in `app/room/[matchId]/client.tsx`.
+  in `app/room/[matchId]/client.tsx`; the landing-page section entrances in
+  `apps/web/components/site/*-section.tsx`.

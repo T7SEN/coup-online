@@ -86,6 +86,18 @@ shadcn's `rounded-sm/md/lg/xl` derive from it.
   - `SeatCard` — an opponent's seat tile (compact: name, coins, two `sm` cards).
   - `PlayerHand` — the viewer's own seat, shown large along the bottom of the
     table: two `md` cards, name, coins, turn state.
+  - `SiteNavbar` — the global site navbar (home / leaderboard / profile),
+    added by `app/(site)/layout.tsx`. Composes the scroll-aware
+    `components/ui/resizable-navbar` primitives: full-width and transparent
+    at the top, it shrinks to a frosted, gold-ruled pill once the page
+    scrolls past 100px (GSAP-animated — see references/animations.md). Brand
+    on the left, nav links centred with a hover pill that tracks the cursor
+    (the active link lit `foreground`), the signed-in identity (avatar →
+    profile, sign-out) on the right. Below `lg` it collapses to a hamburger
+    menu. `Profile` only joins the nav once signed in.
+  - `Footer` — the global footer: one thin line, on **every** page including
+    the game room (added by the root layout). Attribution + the build version
+    read from `package.json`.
 - **The game room is a felt "table"** (`bg-table`) — opponents up top, a court
   centre (phase / timer / deck / action in play), your hand along the bottom;
   the action bars sit below the table as the control strip.

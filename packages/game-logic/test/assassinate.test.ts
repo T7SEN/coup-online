@@ -158,34 +158,88 @@ describe('Assassinate coins stay paid (SKILL.md § 4.4)', () => {
     applyBlockChallengeWindowTimeout(state)
     expect(state.seats[0].coins).toBe(0) // STAYS paid even though target wasn't hit
   })
+
+  it('coins stay paid through a plain unchallenged, unblocked resolution', () => {
+    const state = setupAssassinate(true, true)
+    applyAssassinate(state, 'p0', 'p1')
+    expect(state.seats[0].coins).toBe(0)
+    applyChallengeWindowTimeout(state) // no challenge → BLOCK_WINDOW
+    applyBlockWindowTimeout(state) // no block → assassination resolves
+    applyInfluencePick(state, 'p1', 0)
+    expect(state.seats[0].coins).toBe(0)
+  })
+
+  it('coins stay paid through a proven challenge', () => {
+    const state = setupAssassinate(true, true)
+    applyAssassinate(state, 'p0', 'p1')
+    expect(state.seats[0].coins).toBe(0)
+    applyChallenge(state, 'p2') // proven
+    applyInfluencePick(state, 'p2', 0) // challenger loses → BLOCK_WINDOW
+    applyBlockWindowTimeout(state)
+    applyInfluencePick(state, 'p1', 0)
+    expect(state.seats[0].coins).toBe(0)
+  })
 })
 
 // --- Challenge paths --------------------------------------------------------
 
+// SKILL.md § 3.2 phase 3 — a proven challenge of Assassinate does NOT resolve
+// the assassination; the challenger loses an influence and the action then
+// passes through BLOCK_WINDOW, where the target may still claim Contessa.
 describe('Assassinate proven challenge', () => {
-  it('challenger loses AND target loses (queue [challenger, target])', () => {
+  it('challenger loses an influence, then the action passes to BLOCK_WINDOW', () => {
     const state = setupAssassinate(true, true)
     applyAssassinate(state, 'p0', 'p1')
-    applyChallenge(state, 'p1') // p1 challenges; p0 has Assassin → proven
-    expect(state.influenceLossQueue).toStrictEqual(['p1', 'p1'])
-    // (challenger p1 + target p1 both equal because p1 challenged their own assassination)
-    // p1 picks twice
-    applyInfluencePick(state, 'p1', 0)
+    applyChallenge(state, 'p1') // p1 (target) challenges; p0 has Assassin → proven
     expect(state.influenceLossQueue).toStrictEqual(['p1'])
-    applyInfluencePick(state, 'p1', 1)
-    expect(state.seats[1].isAlive).toBe(false)
+    applyInfluencePick(state, 'p1', 1) // p1 reveals Duke, keeps Contessa face-down
+    expect(state.phase).toBe('BLOCK_WINDOW')
+    expect(state.seats[1].isAlive).toBe(true) // lost one card, still in
   })
 
-  it('different challenger from target: queue is [challenger, target], two players pick', () => {
+  it('the target may still block with Contessa after a proven challenge', () => {
     const state = setupAssassinate(true, true)
     applyAssassinate(state, 'p0', 'p1')
-    applyChallenge(state, 'p2') // p2 (not target) challenges
-    expect(state.influenceLossQueue).toStrictEqual(['p2', 'p1'])
-    applyInfluencePick(state, 'p2', 0) // p2 loses first
+    applyChallenge(state, 'p1')
+    applyInfluencePick(state, 'p1', 1)
+    applyBlock(state, 'p1', 'Contessa')
+    expect(state.phase).toBe('BLOCK_CHALLENGE_WINDOW')
+    applyBlockChallengeWindowTimeout(state) // Contessa block stands
+    expect(state.seats[1].isAlive).toBe(true) // not assassinated
+    expect(state.phase).toBe('AWAITING_ACTION')
+  })
+
+  it('with no block after the proven challenge, the assassination resolves', () => {
+    const state = setupAssassinate(true, true)
+    applyAssassinate(state, 'p0', 'p1')
+    applyChallenge(state, 'p2') // p2 (not the target) challenges → proven
+    expect(state.influenceLossQueue).toStrictEqual(['p2'])
+    applyInfluencePick(state, 'p2', 0) // challenger loses → BLOCK_WINDOW
+    expect(state.phase).toBe('BLOCK_WINDOW')
+    applyBlockWindowTimeout(state) // p1 declines to block
     expect(state.influenceLossQueue).toStrictEqual(['p1'])
-    applyInfluencePick(state, 'p1', 0) // p1 loses (assassinate effect)
+    applyInfluencePick(state, 'p1', 0) // target loses to the assassination
     expect(state.phase).toBe('AWAITING_ACTION')
     expect(countByKind(allCardKinds(state))).toStrictEqual(countByKind(DECK))
+  })
+
+  it('ends the game when the proven challenge eliminates the last opponent', () => {
+    // 2-player endgame: p2 already out, p1 down to a single face-down card.
+    const state = setupAssassinate(true, true)
+    state.seats[2].isAlive = false
+    state.seats[2].eliminationOrder = 1
+    state.seats[2].influence = [
+      { status: 'revealed', kind: 'Captain' },
+      { status: 'revealed', kind: 'Ambassador' },
+    ]
+    state.seats[1].influence[1] = { status: 'revealed', kind: 'Duke' }
+    applyAssassinate(state, 'p0', 'p1')
+    applyChallenge(state, 'p1') // p1 challenges; p0 proven → p1 must lose an influence
+    expect(state.phase).toBe('INFLUENCE_LOSS')
+    applyInfluencePick(state, 'p1', 0) // p1's last card → p1 eliminated
+    expect(state.seats[1].isAlive).toBe(false)
+    // The game is decided — must be GAME_OVER, not a stranded BLOCK_WINDOW.
+    expect(state.phase).toBe('GAME_OVER')
   })
 })
 

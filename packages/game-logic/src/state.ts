@@ -70,4 +70,11 @@ export interface GameState {
   // contents via a `prompt` message and never to other players. Cleared on
   // exchange-pick resolution (and by concludeTurn defensively).
   exchangePool: { readonly actorPlayerId: PlayerId; cards: CardKind[] } | null
+  // True between a proven action-challenge of a blockable action (Steal /
+  // Assassinate) and that action reaching BLOCK_WINDOW. SKILL.md § 3.2 phase 3
+  // — a proven reveal still routes a blockable action through the block
+  // window; this flag tells the influence-loss drain to resume there instead
+  // of concluding the turn. Optional so a GameState rehydrated from before the
+  // field existed reads as `undefined` (falsy = not pending).
+  blockWindowPending?: boolean
 }

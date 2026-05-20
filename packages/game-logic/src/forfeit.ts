@@ -1,7 +1,13 @@
 import type { PlayerId } from '@coup-online/protocol'
-import { concludeTurn, IllegalActionError, nextEliminationOrder } from './actions'
+import {
+  applyActionEffect,
+  concludeTurn,
+  IllegalActionError,
+  nextEliminationOrder,
+} from './actions'
 import { returnToDeckAndShuffle } from './deck'
-import type { GameState } from './state'
+import type { GameState, PendingAction } from './state'
+import { checkWinner } from './win-condition'
 
 // SKILL.md § 3.5 — forfeit-on-disconnect. Server calls this after the 30s
 // grace period elapses with no reconnect (the alarm in apps/game-server's
@@ -53,17 +59,41 @@ export function forfeitPlayer(state: GameState, playerId: PlayerId): GameState {
     state.exchangePool = null
   }
 
+  // A blockable action whose blocker forfeits is resolved as if no block was
+  // declared, rather than canceling the actor's turn (v1 audit, Finding B).
+  // The dead-target guard in applyActionEffect makes Steal / Assassinate fizzle
+  // — their blocker IS the target and is now eliminated — while Foreign Aid
+  // resolves (+2 to the actor, the sole objector having left).
+  let actionToResolve: PendingAction | null = null
   if (state.pendingAction && state.pendingAction.actorPlayerId === playerId) {
+    // The actor abandoned their own action — the whole interaction evaporates.
     state.pendingAction = null
     state.pendingBlock = null
+    state.blockWindowPending = false
+  } else if (state.pendingBlock && state.pendingBlock.blockerPlayerId === playerId) {
+    actionToResolve = state.pendingAction
+    state.pendingBlock = null
+    state.pendingAction = null
   }
-  if (state.pendingBlock && state.pendingBlock.blockerPlayerId === playerId) {
-    state.pendingBlock = null
-    state.pendingAction = null
+  if (actionToResolve) {
+    applyActionEffect(state, actionToResolve.action, actionToResolve.actorPlayerId)
   }
 
   if (state.influenceLossQueue.length > 0) {
     state.phase = 'INFLUENCE_LOSS'
+    return state
+  }
+  // If this forfeit decided the game, end it — a deferred block window or
+  // exchange is moot once only one player remains (SKILL.md § 4.8).
+  if (checkWinner(state)) {
+    return concludeTurn(state)
+  }
+  // per SKILL.md § 3.2 phase 3 — a proven challenge of a blockable action
+  // resumes at BLOCK_WINDOW once influence losses clear, even if the only
+  // queued picker forfeited.
+  if (state.blockWindowPending) {
+    state.blockWindowPending = false
+    state.phase = 'BLOCK_WINDOW'
     return state
   }
   if (state.exchangePool) {

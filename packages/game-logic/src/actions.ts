@@ -123,18 +123,25 @@ export function applyActionEffect(
       // (or all if target has fewer). Target validated at applyStealAction time;
       // getActor here is defense-in-depth against state-inconsistency bugs.
       const target = getActor(state, action.targetPlayerId)
+      // Target eliminated before the action resolved (e.g. forfeited during
+      // the block window) — nothing to steal; the action fizzles.
+      if (!target.isAlive) return
       const amount = Math.min(2, target.coins)
       target.coins -= amount
       actor.coins += amount
       return
     }
-    case 'Assassinate':
+    case 'Assassinate': {
       // SKILL.md § 4.4 — Assassin → Assassinate: target loses an influence.
       // Coins were already paid at declaration (§ 4.4 — paid even if blocked
       // or challenged-and-lost). We just enqueue the target's loss; the caller
       // transitions to INFLUENCE_LOSS via resolveAfterEffects().
-      state.influenceLossQueue.push(action.targetPlayerId)
+      // If the target was eliminated before resolution (e.g. forfeited during
+      // the block window) there is nothing to lose — the assassination fizzles.
+      const target = getActor(state, action.targetPlayerId)
+      if (target.isAlive) state.influenceLossQueue.push(action.targetPlayerId)
       return
+    }
     case 'Exchange': {
       // SKILL.md § 4.4 — Ambassador → Exchange: draw 2 from Court Deck, present
       // the 4-card pool privately, actor picks 2 to keep. Sets up exchangePool;
@@ -235,6 +242,7 @@ export function concludeTurn(state: GameState): GameState {
   state.timerEndsAt = null
   state.influenceLossQueue.length = 0
   state.exchangePool = null
+  state.blockWindowPending = false
   const winner = checkWinner(state)
   if (winner) {
     state.phase = 'GAME_OVER'
@@ -439,6 +447,20 @@ export function applyInfluencePick(
   // Consume this entry.
   state.influenceLossQueue.shift()
   if (state.influenceLossQueue.length > 0) {
+    return state
+  }
+  // If this loss decided the game, end it now — a deferred block window or
+  // exchange is moot once only one player remains (SKILL.md § 4.8).
+  if (checkWinner(state)) {
+    return concludeTurn(state)
+  }
+  // per SKILL.md § 3.2 phase 3 — a proven challenge of a blockable action
+  // (Steal / Assassinate) resumes at BLOCK_WINDOW once the challenger's
+  // influence loss is resolved.
+  if (state.blockWindowPending) {
+    state.blockWindowPending = false
+    state.phase = 'BLOCK_WINDOW'
+    state.timerEndsAt = null
     return state
   }
   if (state.exchangePool) {

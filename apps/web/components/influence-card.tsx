@@ -17,16 +17,22 @@ import { cn } from '@/lib/utils'
 type Size = 'sm' | 'md'
 
 // Card-slot dimensions. The art in public/cards/ is authored 400×600 — a 2:3
-// ratio — so the slots are an exact 2:3, and bg-cover fits with no crop.
+// ratio — so the slots are an exact 2:3 and bg-cover fits with no crop.
 const SIZE_CLASS: Record<Size, string> = {
   sm: 'w-20 aspect-[2/3]',
   md: 'w-32 aspect-[2/3]',
 }
 
-function cardFile(influence: Influence): string {
-  return influence.status === 'hidden'
-    ? 'back.svg'
-    : `${influence.kind.toLowerCase()}.svg`
+// A true two-faced flip card:
+//   front — the named character card, public/cards/<name>.svg (the art already
+//           carries the card's name).
+//   back  — always public/cards/back.svg.
+// `hidden` cards (another player's face-down card) have no known kind, so the
+// front face stays blank and the back faces the viewer. When a card transitions
+// hidden → revealed the inner element rotates 180° (back → front) — a genuine
+// card flip, not a one-sided swing. SKILL.md § 3.1, references/animations.md.
+function frontFile(influence: Influence): string | null {
+  return influence.status === 'hidden' ? null : `${influence.kind.toLowerCase()}.svg`
 }
 
 function cardLabel(influence: Influence): string {
@@ -36,9 +42,6 @@ function cardLabel(influence: Influence): string {
     : influence.kind
 }
 
-// The static card visual — the SVG art from public/cards/. `sizeClassName`
-// controls dimensions. When `animateReveal` is set, the card flips face-up the
-// moment it transitions to `revealed` (a challenge or influence loss).
 function CardFace({
   influence,
   sizeClassName,
@@ -48,46 +51,89 @@ function CardFace({
   sizeClassName: string
   animateReveal?: boolean
 }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const prevStatus = useRef(influence.status)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+  const showsBack = influence.status === 'hidden'
+  const prevShowsBack = useRef(showsBack)
+  const lost = influence.status === 'revealed'
+  const front = frontFile(influence)
+
   useGSAP(
     () => {
-      const becameRevealed =
-        prevStatus.current !== 'revealed' && influence.status === 'revealed'
-      prevStatus.current = influence.status
-      const el = ref.current
-      if (!MOTION_ENABLED || !animateReveal || !becameRevealed || !el) return
+      const inner = innerRef.current
+      if (!inner) return
+      const wasBack = prevShowsBack.current
+      prevShowsBack.current = showsBack
+      // rotationY 0 = front faces the viewer, 180 = back faces the viewer.
+      const target = showsBack ? 180 : 0
+      if (!MOTION_ENABLED || !animateReveal) {
+        gsap.set(inner, { rotationY: target })
+        return
+      }
       const mm = gsap.matchMedia()
+      let animated = false
       mm.add(NO_REDUCED_MOTION, () => {
-        gsap.from(el, {
-          rotationY: 90,
-          scale: 0.82,
-          opacity: 0.35,
-          duration: 0.5,
-          ease: 'back.out(1.3)',
-          transformPerspective: 700,
-        })
+        animated = true
+        if (wasBack === showsBack) {
+          gsap.set(inner, { rotationY: target })
+          return
+        }
+        // The card flipped (hidden → revealed) — rotate back → front with a
+        // perspective sweep, then a small landing thump.
+        gsap.fromTo(
+          inner,
+          { rotationY: wasBack ? 180 : 0 },
+          { rotationY: target, duration: 0.6, ease: 'back.out(1.4)', transformPerspective: 800 },
+        )
+        gsap.fromTo(
+          inner,
+          { scale: 0.86 },
+          { scale: 1, duration: 0.45, ease: 'back.out(2)', delay: 0.16 },
+        )
       })
+      if (!animated) gsap.set(inner, { rotationY: target })
       return () => mm.revert()
     },
-    { dependencies: [influence.status], scope: ref },
+    { dependencies: [showsBack], scope: wrapRef },
   )
 
-  const lost = influence.status === 'revealed'
   return (
     <div
-      ref={ref}
-      style={{ backgroundImage: `url(/cards/${cardFile(influence)})` }}
-      className={cn(
-        'relative overflow-hidden rounded-xl bg-cover bg-center shadow-sm ring-1 ring-foreground/10',
-        sizeClassName,
-        lost && 'opacity-55 grayscale',
-      )}
+      ref={wrapRef}
+      className={cn('relative', sizeClassName)}
+      style={{ perspective: '800px' }}
     >
-      {/* Lost cards get a diagonal strike, clipped to the card by overflow-hidden. */}
-      {lost && (
-        <span className="pointer-events-none absolute top-1/2 left-1/2 h-px w-[200%] -translate-x-1/2 -translate-y-1/2 -rotate-[55deg] bg-white/90" />
-      )}
+      <div
+        ref={innerRef}
+        className="absolute inset-0"
+        style={{ transformStyle: 'preserve-3d' }}
+      >
+        {/* Front — the named character card. */}
+        <div
+          className={cn(
+            'absolute inset-0 overflow-hidden rounded-xl bg-cover bg-center shadow-sm ring-1 ring-foreground/10',
+            lost && 'opacity-55 grayscale',
+          )}
+          style={{
+            backfaceVisibility: 'hidden',
+            backgroundImage: front ? `url(/cards/${front})` : undefined,
+          }}
+        >
+          {/* Lost cards get a diagonal strike, clipped by overflow-hidden. */}
+          {lost && (
+            <span className="pointer-events-none absolute top-1/2 left-1/2 h-px w-[200%] -translate-x-1/2 -translate-y-1/2 -rotate-[55deg] bg-white/90" />
+          )}
+        </div>
+        {/* Back — always back.svg. */}
+        <div
+          className="absolute inset-0 overflow-hidden rounded-xl bg-cover bg-center shadow-sm ring-1 ring-foreground/10"
+          style={{
+            backfaceVisibility: 'hidden',
+            transform: 'rotateY(180deg)',
+            backgroundImage: 'url(/cards/back.svg)',
+          }}
+        />
+      </div>
     </div>
   )
 }
@@ -97,7 +143,7 @@ function CardFace({
 //
 // Protocol Influence states:
 //   hidden    — another player's face-down card → the card back.
-//   face-down — the viewer's own card → that character's art.
+//   face-down — the viewer's own card → that character's front art.
 //   revealed  — a lost card → the character art, faded, greyed and struck.
 export function InfluenceCard({
   influence,
@@ -131,10 +177,7 @@ export function InfluenceCard({
           aria-label="Close enlarged card"
           className="cursor-pointer rounded-2xl outline-none"
         >
-          <CardFace
-            influence={influence}
-            sizeClassName="aspect-[2/3] w-64 max-w-[80vw]"
-          />
+          <CardFace influence={influence} sizeClassName="aspect-[2/3] w-64 max-w-[80vw]" />
         </DialogClose>
       </DialogContent>
     </Dialog>

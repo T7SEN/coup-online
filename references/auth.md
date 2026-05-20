@@ -145,9 +145,11 @@ Files:
 apps/web/
   next.config.ts                       rewrites /api/auth/:path* + /api/ws-token → Worker
   lib/auth-client.ts                   createAuthClient (better-auth/react) + magicLinkClient
+  lib/use-sign-in.ts                   useSignInPopup() — opens /auth/signin in a popup
   lib/get-server-session.ts            Server Component / Route Handler session helper
-  app/auth/signin/page.tsx             Three-provider sign-in UI (client component)
-  app/page.tsx                         Lobby; useSession from auth-client
+  app/auth/signin/page.tsx             Three-provider sign-in UI; runs inside the popup
+  app/auth/callback/page.tsx           Auth landing route — closes popup, signals opener
+  app/(site)/page.tsx                  Lobby; useSession from auth-client
   app/room/[matchId]/page.tsx          Server component; getServerSession + redirect
   app/layout.tsx                       No SessionProvider — Better Auth manages its own state
 ```
@@ -280,6 +282,38 @@ not days). The plugin auto-cleans expired verification rows.
 `BETTER_AUTH_URL` to construct callback URLs that hit Vercel; rewrites
 forward the callback to the Worker for handling. Updating Google / Discord
 consoles to the Worker URL would skip Vercel and break cookies.
+
+These are the **provider** redirect URIs (`/api/auth/callback/<provider>`) —
+distinct from Better Auth's app-level `callbackURL`, which the popup flow
+below points at `/auth/callback`.
+
+### Social sign-in popup
+
+The **whole** sign-in page runs in a popup window. `useSignInPopup()`
+(`lib/use-sign-in.ts`), used by the navbar and the lobby, opens `/auth/signin`
+itself in a popup — opened synchronously in the click handler so a pop-up
+blocker can't kill it (blocked → it falls back to a full-page sign-in). The
+opener page is never navigated away.
+
+Inside that one popup the player picks a provider; `signIn.social()` redirects
+the popup to Google / Discord (an ordinary redirect — no `disableRedirect`, no
+nested popup) with `callbackURL: '/auth/callback'` and `errorCallbackURL:
+'/auth/signin'`. On success Better Auth returns the popup to `/auth/callback`,
+which broadcasts `'popup-done'` on the `'coup-auth'` BroadcastChannel and calls
+`window.close()`. `useSignInPopup()` catches the broadcast, closes its handle
+to the popup, and calls `useSession().refetch()` — so the opener reflects the
+new session in place, with no manual refresh, and the user stays on the page
+they started from. An OAuth failure bounces the popup back to
+`/auth/signin?error=`.
+
+The **magic link** is emailed (`callbackURL: '/auth/callback'`); the user
+clicks it from their mail client and lands on `/auth/callback` authenticated —
+which redirects on to the lobby and, via the same broadcast, updates any
+opener tab still open.
+
+Opened as a plain tab instead of a popup (sign-out landing, deep link),
+`/auth/signin` still works: `signIn.social()` redirects the tab and
+`/auth/callback`'s `window.close()` no-ops, falling back to the lobby.
 
 ### Cloudflare nodejs_compat
 
