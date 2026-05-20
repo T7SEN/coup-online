@@ -15,6 +15,13 @@
       "when": 1779167948272,
       "tag": "0001_shallow_vargas",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1779281629472,
+      "tag": "0002_graceful_scarecrow",
+      "breakpoints": true
     }
   ]
 }

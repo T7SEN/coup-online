@@ -111,6 +111,20 @@ export async function deleteUserAccount(
         email: anonEmail,
         image: null,
         profileImage: null,
+        // Patron storefront — anonymising a patron releases their slug for
+        // someone else to claim, blanks the motto, and disables the cosmetic
+        // toggles. `isPatron` is dropped too, but `founderRank` and
+        // `patronSince` survive so the Hall of Patrons keeps showing the slot
+        // (with "Deleted player" as the inscription).
+        isPatron: false,
+        patronMotto: null,
+        patronSlug: null,
+        patronGildedNickname: false,
+        patronCardBack: null,
+        patronTableTheme: null,
+        patronVanityRoomCode: null,
+        patronShimmerBanner: false,
+        patronVictoryFlourish: false,
       })
       .where(eq(user.id, userId)),
   ])
@@ -131,6 +145,9 @@ export async function getMatchPlayersForMatch(db: Db, matchId: string) {
 
 // All seats of one match joined with each player's display identity — powers
 // the match-summary page. Ordered by finishing position (1 = winner first).
+// Patron columns (`isPatron`, `founderRank`, `patronGildedNickname`) come
+// through so the summary can render the supporter crest + gilded name beside
+// each seat.
 export async function getMatchParticipants(db: Db, matchId: string) {
   return db
     .select({
@@ -138,6 +155,9 @@ export async function getMatchParticipants(db: Db, matchId: string) {
       displayName: user.displayName,
       name: user.name,
       image: user.image,
+      isPatron: user.isPatron,
+      founderRank: user.founderRank,
+      patronGildedNickname: user.patronGildedNickname,
       seat: matchPlayers.seat,
       finishingPosition: matchPlayers.finishingPosition,
       muBefore: matchPlayers.muBefore,
@@ -221,6 +241,9 @@ export async function getLeaderboardTop100(db: Db) {
       displayName: user.displayName,
       name: user.name,
       image: user.image,
+      isPatron: user.isPatron,
+      founderRank: user.founderRank,
+      patronGildedNickname: user.patronGildedNickname,
       mu: user.mu,
       sigma: user.sigma,
       rating: sql<number>`(${user.mu} - 3 * ${user.sigma})`.as('rating'),
@@ -263,6 +286,9 @@ export async function searchUsersByName(db: Db, query: string, limit = 20) {
       displayName: user.displayName,
       name: user.name,
       image: user.image,
+      isPatron: user.isPatron,
+      founderRank: user.founderRank,
+      patronGildedNickname: user.patronGildedNickname,
       mu: user.mu,
       sigma: user.sigma,
       rating: sql<number>`(${user.mu} - 3 * ${user.sigma})`.as('rating'),
@@ -285,6 +311,185 @@ export async function getRankForRating(db: Db, rating: number) {
     .from(user)
     .where(sql`(${user.mu} - 3 * ${user.sigma}) > ${rating}`)
   return Number(rows[0]?.above ?? 0) + 1
+}
+
+// ----------------------------------------------------------------------------
+// Patron storefront — SKILL.md / references/design-system.md.
+// ----------------------------------------------------------------------------
+// All twelve patron privileges live as columns on `user` (see schema.ts).
+// There is no payment integration yet; `isPatron` is flipped manually via
+// `wrangler d1` using `grantPatronage` below, which also assigns the founder
+// rank when applicable. Everything else is just a getter/setter on the row.
+
+// The first ten patrons granted, ordered by founderRank ASC. Powers the
+// public Hall of Patrons page. We return whichever founder slots have been
+// filled — fewer than ten means the rest of the Hall stays vacant.
+export async function getFoundingPatrons(db: Db) {
+  return db
+    .select({
+      userId: user.id,
+      displayName: user.displayName,
+      name: user.name,
+      image: user.image,
+      founderRank: user.founderRank,
+      patronSlug: user.patronSlug,
+      patronSince: user.patronSince,
+    })
+    .from(user)
+    .where(sql`${user.founderRank} IS NOT NULL`)
+    .orderBy(user.founderRank)
+    .limit(10)
+}
+
+// Resolve a vanity slug to its user row, or null. Used by the vanity-URL
+// route (/u/<slug>, future) and by the slug-availability check below.
+export async function getUserByPatronSlug(db: Db, slug: string) {
+  const rows = await db
+    .select()
+    .from(user)
+    .where(eq(user.patronSlug, slug))
+    .limit(1)
+  return rows[0] ?? null
+}
+
+// True iff `slug` is unclaimed (case-sensitive, exact match — the slug
+// validator already normalises before calling this).
+export async function isPatronSlugAvailable(db: Db, slug: string) {
+  const rows = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.patronSlug, slug))
+    .limit(1)
+  return rows.length === 0
+}
+
+// Grant patronage to a user. Called from admin tooling (wrangler d1 + a
+// helper script, or a future payment-webhook handler). Idempotent: if the
+// user is already a patron, leaves their `patronSince` and `founderRank`
+// alone. Founder rank is assigned only on first grant and only if there
+// are fewer than 10 founders already.
+//
+// This is NOT exposed as an HTTP route — patronage cannot be self-granted.
+export async function grantPatronage(db: Db, userId: string) {
+  const me = await getUserById(db, userId)
+  if (!me) throw new Error(`grantPatronage: user ${userId} not found`)
+  if (me.isPatron) return // idempotent
+
+  // Count existing founders to decide whether this grant earns a rank.
+  const rows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(user)
+    .where(sql`${user.founderRank} IS NOT NULL`)
+  const founderCount = Number(rows[0]?.count ?? 0)
+  const founderRank = founderCount < 10 ? founderCount + 1 : null
+
+  await db
+    .update(user)
+    .set({
+      isPatron: true,
+      patronSince: new Date(),
+      founderRank,
+    })
+    .where(eq(user.id, userId))
+}
+
+// Revoke patronage. Sets isPatron = false and clears the cosmetic toggles,
+// but DELIBERATELY leaves `founderRank` and `patronSince` in place — once
+// someone is founder #N, that slot is theirs forever (the Hall keeps showing
+// the seat with their name). Same logic that `deleteUserAccount` applies on
+// anonymise, exposed here as its own helper for the admin tool.
+export async function revokePatronage(db: Db, userId: string) {
+  await db
+    .update(user)
+    .set({
+      isPatron: false,
+      patronMotto: null,
+      patronSlug: null,
+      patronGildedNickname: false,
+      patronCardBack: null,
+      patronTableTheme: null,
+      patronVanityRoomCode: null,
+      patronShimmerBanner: false,
+      patronVictoryFlourish: false,
+    })
+    .where(eq(user.id, userId))
+}
+
+// Admin user search — case-insensitive substring match across email,
+// displayName, and provider name. Returns enough data for the admin tool to
+// identify the user and act on them. Used only by the admin endpoint, so the
+// shape exposes more PII (email) than the public search.
+export async function searchUsersForAdmin(db: Db, query: string, limit = 25) {
+  const term = query.replace(/[%_\\]/g, '').trim()
+  if (term.length === 0) return []
+  const pattern = `%${term}%`
+  return db
+    .select({
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      name: user.name,
+      image: user.image,
+      isPatron: user.isPatron,
+      patronSince: user.patronSince,
+      founderRank: user.founderRank,
+      createdAt: user.createdAt,
+    })
+    .from(user)
+    .where(
+      or(
+        like(user.email, pattern),
+        like(user.displayName, pattern),
+        like(user.name, pattern),
+      ),
+    )
+    .orderBy(desc(user.createdAt))
+    .limit(limit)
+}
+
+// Aggregate counts for the admin overview strip. Cheap — three SELECTs over
+// the `user` table, no joins.
+export async function getAdminStats(db: Db) {
+  const [totalRows, patronRows, founderRows] = await Promise.all([
+    db.select({ n: sql<number>`count(*)` }).from(user),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(user)
+      .where(eq(user.isPatron, true)),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(user)
+      .where(sql`${user.founderRank} IS NOT NULL`),
+  ])
+  return {
+    totalUsers: Number(totalRows[0]?.n ?? 0),
+    activePatrons: Number(patronRows[0]?.n ?? 0),
+    founderSlotsUsed: Number(founderRows[0]?.n ?? 0),
+  }
+}
+
+// PATCH the patron-controlled bits of the user's storefront. Caller passes
+// only the fields it wants to change. Caller is also responsible for input
+// validation (length caps on motto, slug shape + uniqueness, preset-set
+// membership for cardBack / tableTheme, etc.) — this function blindly writes
+// what it's given.
+export interface PatronSettingsPatch {
+  patronMotto?: string | null
+  patronSlug?: string | null
+  patronGildedNickname?: boolean
+  patronCardBack?: string | null
+  patronTableTheme?: string | null
+  patronVanityRoomCode?: string | null
+  patronShimmerBanner?: boolean
+  patronVictoryFlourish?: boolean
+}
+
+export async function updatePatronSettings(
+  db: Db,
+  userId: string,
+  patch: PatronSettingsPatch,
+) {
+  await db.update(user).set(patch).where(eq(user.id, userId))
 }
 
 // ----------------------------------------------------------------------------

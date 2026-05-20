@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 // SKILL.md § 2 — Persistence layer.
 // D1 (SQLite) accessed exclusively from the Worker via the `DB` binding.
@@ -46,11 +46,58 @@ export const user = sqliteTable('user', {
   // Profile crest customization. `profileColor` is a key into a fixed preset
   // palette (PROFILE_COLORS in apps/web/.../profile-colors.ts) — the banner
   // strip behind the avatar renders in that color. NOT NULL so the crest
-  // always has a backdrop. `profileImage` is groundwork for a future
-  // supporter perk: a custom banner image URL. NULL for everyone today; when
-  // set it takes precedence over `profileColor`.
+  // always has a backdrop. `profileImage` is the patron-uploaded custom
+  // banner image URL (R2-hosted). NULL for everyone today; when set it
+  // takes precedence over `profileColor`.
   profileColor: text('profileColor').notNull().default('parchment'),
   profileImage: text('profileImage'),
+  // ----- Patron storefront. -----
+  // The patronage programme is cosmetic only (Coup Online is ranked — no
+  // pay-to-win, see references/design-system.md). There is no payment
+  // backend yet, so `isPatron` is flipped manually via `wrangler d1` for now
+  // (see queries.ts → `grantPatronage` for the helper that also assigns
+  // `founderRank`). Every column below is inert when `isPatron = 0`.
+  //
+  // The list mirrors the twelve privileges shown on /support.
+  isPatron: integer('isPatron', { mode: 'boolean' }).notNull().default(false),
+  // When the user first became a patron — used to derive ordering and a
+  // "Patron since YYYY" label.
+  patronSince: integer('patronSince', { mode: 'timestamp_ms' }),
+  // 1–10 if the user is among the first ten patrons ever granted; NULL
+  // otherwise. Assigned once at grant time and never changed — founding rank
+  // survives even after the patron count grows past ten.
+  founderRank: integer('founderRank'),
+  // Short line displayed beneath the nickname on the profile. App enforces
+  // a length cap (≤ 60 chars).
+  patronMotto: text('patronMotto'),
+  // Vanity URL slug — `/u/<slug>` resolves to this user. Unique across
+  // users via the partial unique index in the migration. NULL until the
+  // patron claims one.
+  patronSlug: text('patronSlug'),
+  // Render the nickname in gold leaf wherever it appears.
+  patronGildedNickname: integer('patronGildedNickname', { mode: 'boolean' })
+    .notNull()
+    .default(false),
+  // Card-back skin key for the cards held in the patron's hand. One of a
+  // small preset set; NULL = the default back.
+  patronCardBack: text('patronCardBack'),
+  // Table-theme key for private rooms hosted by this patron. One of a small
+  // preset set; NULL = the default felt.
+  patronTableTheme: text('patronTableTheme'),
+  // Default preferred custom code for private rooms — used as a fallback at
+  // room-creation time when the patron doesn't type one explicitly. NULL
+  // means the system generates a random code as today.
+  patronVanityRoomCode: text('patronVanityRoomCode'),
+  // Animated "living" banner on the profile — a gentle shimmer overlay on
+  // top of the crest backdrop.
+  patronShimmerBanner: integer('patronShimmerBanner', { mode: 'boolean' })
+    .notNull()
+    .default(false),
+  // Short flourish that plays across the table the moment this patron wins
+  // a match.
+  patronVictoryFlourish: integer('patronVictoryFlourish', { mode: 'boolean' })
+    .notNull()
+    .default(false),
   // TrueSkill rating. Defaults match SKILL.md § 3.6.
   mu: real('mu').notNull().default(25),
   sigma: real('sigma').notNull().default(25.0 / 3.0),
@@ -61,7 +108,11 @@ export const user = sqliteTable('user', {
   updatedAt: integer('updatedAt', { mode: 'timestamp_ms' })
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
-})
+}, (u) => ({
+  // Vanity slug must be unique across users. SQLite treats every NULL in a
+  // unique index as distinct, so unset slugs never collide.
+  patronSlugIdx: uniqueIndex('user_patronSlug_unique').on(u.patronSlug),
+}))
 
 // Better Auth's DB-backed session. Cookie cache (60s) skips this for hot reads.
 export const session = sqliteTable(

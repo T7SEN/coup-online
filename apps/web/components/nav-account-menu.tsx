@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { LogOut, Settings, UserRound } from 'lucide-react'
+import { LogOut, Settings, Shield, UserRound } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 
 // The signed-in account control in the desktop navbar — the avatar + name
@@ -10,6 +10,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 // opens a small menu with Profile, Settings and Sign out (Profile is no
 // longer a top-level nav link). Closes on mouse-leave, click-outside, Escape,
 // or picking an item.
+//
+// `isAdmin` is computed by the parent (SiteNavbar) using `isAdminEmail` from
+// `@coup-online/protocol`. When true, an extra "Admin" item appears between
+// Settings and the Sign-out separator. The page at /admin and the
+// /api/admin/* endpoints both re-verify admin status server-side, so showing
+// this entry to a non-admin would still produce a 404 — but we hide it
+// anyway to keep the menu uncluttered for ordinary users.
 
 const CLOSE_DELAY_MS = 140
 
@@ -17,6 +24,7 @@ interface NavAccountMenuProps {
   displayName: string
   image: string | null | undefined
   profileHref: string
+  isAdmin: boolean
   onSignOut: () => void
 }
 
@@ -24,6 +32,7 @@ export function NavAccountMenu({
   displayName,
   image,
   profileHref,
+  isAdmin,
   onSignOut,
 }: NavAccountMenuProps) {
   const [open, setOpen] = useState(false)
@@ -121,6 +130,17 @@ export function NavAccountMenu({
             <Settings className="size-4" aria-hidden />
             Settings
           </Link>
+          {isAdmin && (
+            <Link
+              role="menuitem"
+              href="/admin"
+              onClick={() => setOpen(false)}
+              className={itemClass}
+            >
+              <Shield className="size-4" aria-hidden />
+              Admin
+            </Link>
+          )}
           <div className="my-1 h-px bg-border" />
           <button
             type="button"

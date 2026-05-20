@@ -23,6 +23,21 @@ const nextConfig: NextConfig = {
         source: '/api/players/:path*',
         destination: `${target}/api/players/:path*`,
       },
+      // Patron storefront — public Hall of Patrons list + the slug lookup,
+      // both reached by Server Components (and the Hall page from the
+      // browser, eventually).
+      { source: '/api/patrons', destination: `${target}/api/patrons` },
+      {
+        source: '/api/patrons/:path*',
+        destination: `${target}/api/patrons/:path*`,
+      },
+      // Admin tools — gated server-side by `isAdminEmail` (see
+      // packages/protocol/src/admin.ts). Existence is private: a non-admin
+      // caller gets 404 from the Worker, same as the /admin page itself.
+      {
+        source: '/api/admin/:path*',
+        destination: `${target}/api/admin/:path*`,
+      },
     ]
   },
 }

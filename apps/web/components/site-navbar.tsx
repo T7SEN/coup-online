@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { LogOut, Settings, UserRound } from 'lucide-react'
+import { LogOut, Settings, Shield, UserRound } from 'lucide-react'
+import { isAdminEmail } from '@coup-online/protocol'
 import {
   MobileNav,
   MobileNavHeader,
@@ -46,6 +47,10 @@ export function SiteNavbar() {
 
   // The signed-in user's own profile page — linked from the account menu.
   const profileHref = user ? `/profile/${user.id}` : '/profile'
+  // Discreet admin entry — only rendered for the allow-listed email(s).
+  // Server-side gates re-verify on /admin and /api/admin/* so this is purely
+  // a UI courtesy, not a security boundary.
+  const isAdmin = isAdminEmail(user?.email ?? null)
   const links = PUBLIC_LINKS
 
   // Resolve the active link here so NavItems only needs the matched href:
@@ -82,6 +87,7 @@ export function SiteNavbar() {
               displayName={displayName}
               image={user.image}
               profileHref={profileHref}
+              isAdmin={isAdmin}
               onSignOut={handleSignOut}
             />
           ) : (
@@ -159,6 +165,16 @@ export function SiteNavbar() {
                 <Settings className="size-4" aria-hidden />
                 Settings
               </Link>
+              {isAdmin && (
+                <Link
+                  href="/admin"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+                >
+                  <Shield className="size-4" aria-hidden />
+                  Admin
+                </Link>
+              )}
               <button
                 type="button"
                 onClick={() => {

@@ -1,24 +1,33 @@
 import * as Sentry from '@sentry/cloudflare'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import {
   createDb,
   deleteUserAccount,
+  getAdminStats,
+  getFoundingPatrons,
   getLeaderboardTop100,
   getMatchById,
   getMatchParticipants,
   getRankForRating,
   getUserAccountProviders,
   getUserById,
+  getUserByPatronSlug,
   getUserMatchHistory,
   getUserMatchStats,
   getUserRatingHistory,
+  grantPatronage,
+  isPatronSlugAvailable,
+  revokePatronage,
   searchUsersByName,
+  searchUsersForAdmin,
+  updatePatronSettings,
   updateUserDisplayName,
   updateUserImage,
   updateUserProfileColor,
+  type PatronSettingsPatch,
 } from '@coup-online/db'
-import { validateDisplayName } from '@coup-online/protocol'
+import { isAdminEmail, validateDisplayName } from '@coup-online/protocol'
 import { conservativeRating } from '@coup-online/rating'
 import { createAuth } from './auth'
 import { GameRoom as GameRoomClass } from './do-game-room'
@@ -108,6 +117,206 @@ app.post('/api/ws-token', async (c) => {
   return c.json({ token })
 })
 
+// Founding patrons — the ten Hall of Patrons slots, in founder-rank order.
+// Public: patron names are public info (they appear on the leaderboard with a
+// crest as well). Returns whichever of the 1–10 ranks have been filled —
+// fewer than ten means the Hall keeps showing some "vacant" slots.
+app.get('/api/patrons', async (c) => {
+  const db = createDb(c.env.DB)
+  const rows = await getFoundingPatrons(db)
+  return c.json({
+    patrons: rows.map((r) => ({
+      userId: r.userId,
+      // founderRank is non-null in this list by definition (the WHERE filters
+      // it), but the TS column type is nullable — coalesce for the wire shape.
+      founderRank: r.founderRank ?? 0,
+      displayName: r.displayName?.trim() || r.name,
+      image: r.image,
+      slug: r.patronSlug,
+      patronSince: r.patronSince?.getTime() ?? null,
+    })),
+  })
+})
+
+// Vanity-slug lookup — resolve a `patronSlug` to its userId. Public; used by
+// the future /u/<slug> route on the web client to redirect to /profile/<id>.
+// 404 when no patron holds the slug.
+app.get('/api/patrons/by-slug/:slug', async (c) => {
+  const slug = c.req.param('slug')
+  const db = createDb(c.env.DB)
+  const me = await getUserByPatronSlug(db, slug)
+  if (!me || !me.isPatron) {
+    return c.json({ error: 'not_found' }, 404)
+  }
+  return c.json({
+    userId: me.id,
+    displayName: me.displayName?.trim() || me.name,
+    slug: me.patronSlug,
+  })
+})
+
+// PATCH the patron-controlled bits of the storefront. Better Auth
+// session-gated AND patron-gated — non-patrons get 403. The body is a sparse
+// patch: any subset of the editable fields. Server-side validation enforces:
+//   - patronMotto: ≤ 60 chars, trimmed; null clears it.
+//   - patronSlug: 3–24 chars, [a-z0-9-], must be unique; null clears it.
+//   - patronCardBack / patronTableTheme: must be in the allowed preset sets
+//     (CARD_BACK_SKINS / TABLE_THEMES below); null clears.
+//   - patronVanityRoomCode: 4–10 chars, [A-Z0-9]; null clears.
+//   - The three boolean toggles take true/false straight.
+//
+// Returns the new public-safe patron block on success.
+const CARD_BACK_SKINS = new Set([
+  'parchment', // default-equivalent (the standard back)
+  'oxblood',
+  'forest',
+  'ivory',
+])
+const TABLE_THEMES = new Set([
+  'standard',
+  'oxblood-court',
+  'forest',
+  'midnight',
+])
+const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,22}[a-z0-9])?$/
+const VANITY_CODE_RE = /^[A-Z0-9]{4,10}$/
+
+app.patch('/api/me/patron', async (c) => {
+  const auth = createAuth(c.env)
+  const session = await auth.api.getSession({ headers: c.req.raw.headers })
+  if (!session?.user?.id) return c.json({ error: 'unauthorized' }, 401)
+
+  const userId = session.user.id
+  const db = createDb(c.env.DB)
+  const me = await getUserById(db, userId)
+  if (!me) return c.json({ error: 'user_not_found' }, 404)
+  if (!me.isPatron) return c.json({ error: 'not_a_patron' }, 403)
+
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'invalid_body' }, 400)
+  }
+  if (typeof body !== 'object' || body === null) {
+    return c.json({ error: 'invalid_body' }, 400)
+  }
+  const patch = body as Record<string, unknown>
+  const out: PatronSettingsPatch = {}
+
+  // Motto: string ≤ 60 chars after trim, or null to clear.
+  if ('motto' in patch) {
+    const v = patch.motto
+    if (v === null) {
+      out.patronMotto = null
+    } else if (typeof v === 'string') {
+      const t = v.trim()
+      if (t.length === 0) out.patronMotto = null
+      else if (t.length > 60) return c.json({ error: 'motto_too_long' }, 400)
+      else out.patronMotto = t
+    } else {
+      return c.json({ error: 'invalid_motto' }, 400)
+    }
+  }
+
+  // Slug: 3–24 chars, [a-z0-9-], must be unique. Reject if already taken by
+  // another user. Null clears.
+  if ('slug' in patch) {
+    const v = patch.slug
+    if (v === null) {
+      out.patronSlug = null
+    } else if (typeof v === 'string') {
+      const s = v.trim().toLowerCase()
+      if (!SLUG_RE.test(s)) {
+        return c.json({ error: 'invalid_slug' }, 400)
+      }
+      // Only re-check uniqueness if the slug is changing from the current one.
+      if (s !== me.patronSlug) {
+        const free = await isPatronSlugAvailable(db, s)
+        if (!free) return c.json({ error: 'slug_taken' }, 409)
+      }
+      out.patronSlug = s
+    } else {
+      return c.json({ error: 'invalid_slug' }, 400)
+    }
+  }
+
+  // Boolean toggles.
+  for (const key of [
+    'gildedNickname',
+    'shimmerBanner',
+    'victoryFlourish',
+  ] as const) {
+    if (key in patch) {
+      const v = patch[key]
+      if (typeof v !== 'boolean') {
+        return c.json({ error: `invalid_${key}` }, 400)
+      }
+      const mapped = (
+        {
+          gildedNickname: 'patronGildedNickname',
+          shimmerBanner: 'patronShimmerBanner',
+          victoryFlourish: 'patronVictoryFlourish',
+        } as const
+      )[key]
+      out[mapped] = v
+    }
+  }
+
+  // Card-back skin / table theme — must be in the preset set.
+  if ('cardBack' in patch) {
+    const v = patch.cardBack
+    if (v === null) out.patronCardBack = null
+    else if (typeof v === 'string' && CARD_BACK_SKINS.has(v))
+      out.patronCardBack = v
+    else return c.json({ error: 'invalid_cardBack' }, 400)
+  }
+  if ('tableTheme' in patch) {
+    const v = patch.tableTheme
+    if (v === null) out.patronTableTheme = null
+    else if (typeof v === 'string' && TABLE_THEMES.has(v))
+      out.patronTableTheme = v
+    else return c.json({ error: 'invalid_tableTheme' }, 400)
+  }
+
+  // Vanity room code — 4–10 uppercase alphanumerics; null clears.
+  if ('vanityRoomCode' in patch) {
+    const v = patch.vanityRoomCode
+    if (v === null) {
+      out.patronVanityRoomCode = null
+    } else if (typeof v === 'string') {
+      const code = v.trim().toUpperCase()
+      if (code.length === 0) out.patronVanityRoomCode = null
+      else if (!VANITY_CODE_RE.test(code))
+        return c.json({ error: 'invalid_vanityRoomCode' }, 400)
+      else out.patronVanityRoomCode = code
+    } else {
+      return c.json({ error: 'invalid_vanityRoomCode' }, 400)
+    }
+  }
+
+  await updatePatronSettings(db, userId, out)
+
+  // Read back and return the merged public-facing patron block.
+  const next = await getUserById(db, userId)
+  if (!next) return c.json({ error: 'user_not_found' }, 404)
+  return c.json({
+    patron: {
+      isPatron: next.isPatron,
+      founderRank: next.founderRank,
+      patronSince: next.patronSince?.getTime() ?? null,
+      slug: next.patronSlug,
+      motto: next.patronMotto,
+      gildedNickname: next.patronGildedNickname,
+      cardBack: next.patronCardBack,
+      tableTheme: next.patronTableTheme,
+      vanityRoomCode: next.patronVanityRoomCode,
+      shimmerBanner: next.patronShimmerBanner,
+      victoryFlourish: next.patronVictoryFlourish,
+    },
+  })
+})
+
 // Leaderboard — public top-100 by conservative rating (SKILL.md § 3.6).
 // Read-only D1 access; the Worker owns D1, the Next.js leaderboard page
 // proxies here via next.config.ts rewrites().
@@ -126,6 +335,12 @@ app.get('/api/leaderboard', async (c) => {
         userId: r.id,
         displayName: r.displayName?.trim() || r.name,
         image: r.image,
+        // Patron badge data for the leaderboard. founderRank ∈ [1, 10] gets a
+        // distinct mark; isPatron alone gets the supporter crest;
+        // patronGildedNickname tells the renderer to draw the name in gold.
+        isPatron: r.isPatron,
+        founderRank: r.founderRank,
+        patronGildedNickname: r.patronGildedNickname,
         rating: conservativeRating(r.mu, r.sigma),
         played,
         wins,
@@ -150,6 +365,11 @@ app.get('/api/players/search', async (c) => {
       userId: r.id,
       displayName: r.displayName?.trim() || r.name,
       image: r.image,
+      // Same patron badge data the full leaderboard exposes — search results
+      // render with the same crest / gilded-name treatment.
+      isPatron: r.isPatron,
+      founderRank: r.founderRank,
+      patronGildedNickname: r.patronGildedNickname,
       rating: conservativeRating(r.mu, r.sigma),
       // NULL for users with no matches (LEFT JOIN) — coalesce.
       played: Number(r.played ?? 0),
@@ -185,6 +405,19 @@ app.get('/api/profile/:userId', async (c) => {
       profileImage: me.profileImage,
     },
     stats,
+    // Public-safe patron storefront subset — everything a stranger viewing the
+    // profile is allowed to see. Cosmetic fields used in-game (cardBack,
+    // tableTheme, vanityRoomCode, victoryFlourish) are excluded — they're
+    // either owner-only preferences or specific to match contexts.
+    patron: {
+      isPatron: me.isPatron,
+      founderRank: me.founderRank,
+      patronSince: me.patronSince?.getTime() ?? null,
+      slug: me.patronSlug,
+      motto: me.patronMotto,
+      gildedNickname: me.patronGildedNickname,
+      shimmerBanner: me.patronShimmerBanner,
+    },
     ratingHistory: ratingHistory.map((h) => ({
       at: h.createdAt.getTime(),
       rating: conservativeRating(h.muAfter, h.sigmaAfter),
@@ -222,12 +455,27 @@ app.get('/api/me/profile', async (c) => {
       image: me.image,
       rating: conservativeRating(me.mu, me.sigma),
       rank,
-      // Crest customization — banner color preset, plus the (currently always
-      // null) supporter-perk custom banner image.
+      // Crest customization — banner color preset, plus the supporter-perk
+      // custom banner image (NULL until the patron uploads one).
       profileColor: me.profileColor,
       profileImage: me.profileImage,
     },
     stats,
+    // Full patron storefront — every editable field plus the read-only
+    // markers. Powers the patron section in /settings.
+    patron: {
+      isPatron: me.isPatron,
+      founderRank: me.founderRank,
+      patronSince: me.patronSince?.getTime() ?? null,
+      slug: me.patronSlug,
+      motto: me.patronMotto,
+      gildedNickname: me.patronGildedNickname,
+      cardBack: me.patronCardBack,
+      tableTheme: me.patronTableTheme,
+      vanityRoomCode: me.patronVanityRoomCode,
+      shimmerBanner: me.patronShimmerBanner,
+      victoryFlourish: me.patronVictoryFlourish,
+    },
     matches: history.map((m) => ({
       matchId: m.matchId,
       endedAt: m.endedAt.getTime(),
@@ -324,6 +572,12 @@ app.get('/api/me/matches/:matchId', async (c) => {
         userId: p.userId,
         displayName: p.displayName?.trim() || p.name,
         image: p.image,
+        // Patron badge data so the summary can render the supporter crest +
+        // gilded name for each seat. Subset only — full storefront isn't
+        // needed here.
+        isPatron: p.isPatron,
+        founderRank: p.founderRank,
+        patronGildedNickname: p.patronGildedNickname,
         seat: p.seat,
         finishingPosition: p.finishingPosition,
         ratingBefore: before,
@@ -443,6 +697,14 @@ app.get('/api/me/account', async (c) => {
     // Empty for a magic-link-only account (no `account` row) — the client
     // renders that as "Email link".
     providers,
+    // Patron read-only markers — the Settings page uses these to surface
+    // patron status (and the founding-patron badge) alongside the existing
+    // account info. Edits go through PATCH /api/me/patron.
+    patron: {
+      isPatron: me.isPatron,
+      founderRank: me.founderRank,
+      patronSince: me.patronSince?.getTime() ?? null,
+    },
   })
 })
 
@@ -478,6 +740,102 @@ app.get('/api/avatars/:userId', async (c) => {
       'Content-Type': obj.httpMetadata?.contentType ?? 'image/webp',
       'Cache-Control': 'public, max-age=604800',
     },
+  })
+})
+
+// ============================================================================
+// Admin — gated by `isAdminEmail` against the Better Auth session email.
+// ============================================================================
+//
+// Existence of /api/admin/* is private: the gate returns 404 (not 403) to a
+// non-admin caller, so it cannot be probed to discover that the route exists.
+// The web side's /admin page does the same — anyone whose email isn't in the
+// allow-list gets `notFound()`. Defense in depth: the page gate prevents the
+// UI from rendering, the endpoint gate prevents direct API calls.
+//
+// SKILL.md § 5 — admin email check goes through `isAdminEmail`, the single
+// source of truth (packages/protocol/src/admin.ts).
+
+// Admin gate. Returns the signed-in admin's userId, or null when the caller
+// isn't an admin. Callers respond with 404 on null so the route's existence
+// stays private.
+async function checkAdmin(
+  c: Context<{ Bindings: Env }>,
+): Promise<string | null> {
+  const auth = createAuth(c.env)
+  const session = await auth.api.getSession({ headers: c.req.raw.headers })
+  if (!session?.user?.id || !isAdminEmail(session.user.email)) return null
+  return session.user.id
+}
+
+// Admin overview — totals for the admin landing strip.
+app.get('/api/admin/stats', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const db = createDb(c.env.DB)
+  const stats = await getAdminStats(db)
+  return c.json(stats)
+})
+
+// User search across email + displayName + provider name. PII (email)
+// included — admin tooling only.
+app.get('/api/admin/users', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const q = (c.req.query('q') ?? '').trim()
+  if (q.length < 2) return c.json({ users: [] })
+  const db = createDb(c.env.DB)
+  const rows = await searchUsersForAdmin(db, q, 25)
+  return c.json({
+    users: rows.map((r) => ({
+      userId: r.id,
+      email: r.email,
+      displayName: r.displayName?.trim() || r.name,
+      image: r.image,
+      isPatron: r.isPatron,
+      founderRank: r.founderRank,
+      patronSince: r.patronSince?.getTime() ?? null,
+      createdAt: r.createdAt.getTime(),
+    })),
+  })
+})
+
+// Grant patronage to a user. Idempotent (the underlying helper is). Assigns a
+// founder rank automatically if there are fewer than 10 founders.
+app.post('/api/admin/users/:userId/grant-patron', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const targetId = c.req.param('userId')
+  const db = createDb(c.env.DB)
+  const target = await getUserById(db, targetId)
+  if (!target) return c.json({ error: 'user_not_found' }, 404)
+  await grantPatronage(db, targetId)
+  const next = await getUserById(db, targetId)
+  return c.json({
+    userId: next?.id,
+    isPatron: next?.isPatron ?? false,
+    founderRank: next?.founderRank ?? null,
+    patronSince: next?.patronSince?.getTime() ?? null,
+  })
+})
+
+// Revoke patronage. Clears every cosmetic toggle, BUT keeps `founderRank`
+// and `patronSince` so the Hall of Patrons keeps the slot. The user can be
+// re-granted later without losing their founder position.
+app.post('/api/admin/users/:userId/revoke-patron', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const targetId = c.req.param('userId')
+  const db = createDb(c.env.DB)
+  const target = await getUserById(db, targetId)
+  if (!target) return c.json({ error: 'user_not_found' }, 404)
+  await revokePatronage(db, targetId)
+  const next = await getUserById(db, targetId)
+  return c.json({
+    userId: next?.id,
+    isPatron: next?.isPatron ?? false,
+    founderRank: next?.founderRank ?? null,
+    patronSince: next?.patronSince?.getTime() ?? null,
   })
 })
 

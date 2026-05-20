@@ -65,6 +65,10 @@ const FOLIOS: Folio[] = [
         text: 'Every Server-rendered page now redirects to /maintenance when the game server is unreachable (network failure or 5xx). The play hub probes the Worker before rendering too, so the visitor never sees the empty hub when no game can actually be created.',
       },
       {
+        tag: 'Added',
+        text: 'Patron storefront — the database, queries, and Worker endpoints behind the twelve patron privileges. All inert until the cosmetics ship in upcoming releases, but the data is in place: founder rank, supporter crest, gilded nickname, motto, vanity slug, card-back skin, table theme, vanity room code, living banner, victory flourish.',
+      },
+      {
         tag: 'Refined',
         text: 'The site now uses a slim gold scrollbar in place of the default browser one.',
       },
