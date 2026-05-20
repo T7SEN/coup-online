@@ -62,7 +62,13 @@ export function Footer() {
         <span aria-hidden="true" className="mx-1.5 text-muted-foreground/50">
           ·
         </span>
-        v{version}
+        <Link
+          href="/changelog"
+          aria-label={`Changelog — currently on v${version}`}
+          className="tabular-nums transition-colors hover:text-foreground"
+        >
+          v{version}
+        </Link>
         <span aria-hidden="true" className="mx-1.5 text-muted-foreground/50">
           ·
         </span>

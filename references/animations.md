@@ -58,7 +58,7 @@ desync or block the game.
 | "How it plays" animated turn demo — a looping stage plays out a turn (claim → challenge → influence lost: card lifts + glows, 2D `scaleX` flip-reveal, then dims + tilts away); a subtle backing panel fades in behind whichever beat is active | `HowItPlaysSection` | section scrolls into view (ScrollTrigger), loops, pauses off-screen |
 | "The court" entrance (card deal — cards burst from centre with a spin + overshoot); the pointed-at card spotlights and tilts 3D toward the cursor | `TheCourtSection` | section scrolls into view (ScrollTrigger) |
 | Closing entrance (vignette fades in, kicker drops, the monumental heading zoom-settles, lede rises, button pops, footer rises) | `ClosingSection` | section scrolls into view (ScrollTrigger) |
-| Section reveal (fade + rise) — Rules + Privacy pages | `RevealSection` (`components/site/`) | a section scrolls into view (ScrollTrigger) |
+| Section reveal (fade + rise) — Rules, Privacy, Terms, Changelog pages | `RevealSection` (`components/site/`) | a section scrolls into view (ScrollTrigger) |
 | Play-hub entrance — header reveals, then the three option cards are "dealt" onto the table (drop + rotate + settle overshoot), then their icon medallions pop | `PlayHub` (`app/(site)/play/`) | page mounts |
 | 404 entrance — vignette fades, the "404" card pops in, its corner lozenges pop, then the copy + buttons rise | `not-found.tsx` (`app/`) | the 404 page mounts |
 | Support-page entrance — header reveals, the privileges gallery rises, then the close lifts; flipping a privilege card slides the next one in (direction-aware) | `SupportContent` (`app/(site)/support/`) | page mounts; the gallery card on every index change |

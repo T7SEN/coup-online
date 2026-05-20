@@ -109,6 +109,39 @@
   }
 }
 
+/* Custom scrollbar — gold-tinted to match the manuscript theme. A slim
+   translucent pill on a transparent track; brighter on hover. Rules sit OUTSIDE
+   `@layer base` so they cannot be lowered by cascade-layer ordering, and the
+   `::-webkit-scrollbar` selectors are bare (no `*` prefix) so Chromium applies
+   them to the document/root scrollbar reliably.
+   Chromium 121+ note: when `scrollbar-width` is non-auto on the root, Chrome
+   ignores every `::-webkit-scrollbar` rule. We therefore do NOT set
+   `scrollbar-width` on html; Firefox falls back to a default-width scrollbar
+   coloured via `scrollbar-color`. Per-element Tailwind utilities (e.g. the Hall
+   honour roll's `[&::-webkit-scrollbar]:w-1`) are class-scoped and still win on
+   specificity. */
+html {
+  /* Firefox-side colour only. */
+  scrollbar-color: color-mix(in oklab, var(--gold) 55%, transparent) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--gold) 55%, transparent);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--gold) 80%, transparent);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Home-page section snapping. app/(site)/page.tsx adds `snap-home` to <html>
    while it is mounted, so snapping never leaks onto the leaderboard / profile
    / room pages. Every section is min-h-svh — never shorter than the viewport —
