@@ -4,7 +4,7 @@ import { Crown } from 'lucide-react'
 import { OrnamentDivider } from '@/components/site/ornament-divider'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { GAME_SERVER_HTTP } from '@/lib/config'
+import { fetchWorker } from '@/lib/worker-fetch'
 import { cn } from '@/lib/utils'
 import { LeaderboardSearch } from './leaderboard-search'
 
@@ -31,17 +31,14 @@ interface LeaderboardPlayer {
 const HOVER =
   'transition duration-200 motion-reduce:transition-none hover:-translate-y-0.5 hover:shadow-md'
 
+// Network / 5xx → /maintenance inside fetchWorker. null here means the Worker
+// returned an unexpected non-OK 4xx (none are expected from this public route,
+// so this is the "shouldn't normally happen" branch).
 async function fetchLeaderboard(): Promise<LeaderboardPlayer[] | null> {
-  try {
-    const res = await fetch(`${GAME_SERVER_HTTP}/api/leaderboard`, {
-      cache: 'no-store',
-    })
-    if (!res.ok) return null
-    const json = (await res.json()) as { players: LeaderboardPlayer[] }
-    return json.players
-  } catch {
-    return null
-  }
+  const res = await fetchWorker('/api/leaderboard', { cache: 'no-store' })
+  if (!res.ok) return null
+  const json = (await res.json()) as { players: LeaderboardPlayer[] }
+  return json.players
 }
 
 // Win rate as a whole-number percentage; 0 when the player has no matches.

@@ -6,7 +6,7 @@ import { ChevronLeft, Crown } from 'lucide-react'
 import { OrnamentDivider } from '@/components/site/ornament-divider'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { GAME_SERVER_HTTP } from '@/lib/config'
+import { fetchWorker } from '@/lib/worker-fetch'
 import { cn, ordinal } from '@/lib/utils'
 
 // A finished match's summary — final standings and per-seat rating deltas.
@@ -45,24 +45,23 @@ interface MatchData {
   players: MatchPlayer[]
 }
 
+// Network / 5xx → /maintenance inside fetchWorker. null here means the Worker
+// returned an unexpected non-OK 4xx other than 401/403/404 — "shouldn't
+// normally happen".
 async function fetchMatch(
   matchId: string,
   cookie: string,
 ): Promise<MatchData | 'unauthorized' | 'not-found' | null> {
-  try {
-    const res = await fetch(
-      `${GAME_SERVER_HTTP}/api/me/matches/${encodeURIComponent(matchId)}`,
-      { headers: { cookie }, cache: 'no-store' },
-    )
-    if (res.status === 401) return 'unauthorized'
-    // 403 (not a participant) is folded into 'not-found' so the page never
-    // confirms a match exists to someone who wasn't in it.
-    if (res.status === 403 || res.status === 404) return 'not-found'
-    if (!res.ok) return null
-    return (await res.json()) as MatchData
-  } catch {
-    return null
-  }
+  const res = await fetchWorker(
+    `/api/me/matches/${encodeURIComponent(matchId)}`,
+    { headers: { cookie }, cache: 'no-store' },
+  )
+  if (res.status === 401) return 'unauthorized'
+  // 403 (not a participant) is folded into 'not-found' so the page never
+  // confirms a match exists to someone who wasn't in it.
+  if (res.status === 403 || res.status === 404) return 'not-found'
+  if (!res.ok) return null
+  return (await res.json()) as MatchData
 }
 
 // Fixed ISO date (YYYY-MM-DD) — locale/timezone-stable for server rendering.

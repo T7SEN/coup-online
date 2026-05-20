@@ -244,6 +244,47 @@ app.get('/api/me/profile', async (c) => {
   })
 })
 
+// Paginated match history for the dedicated /profile/[userId]/history page.
+// Better Auth session-gated and participant-only by construction: the query
+// always filters by the requester's session userId, so a viewer only ever sees
+// matches they took part in (SKILL.md § 3.6). The profile sidebar keeps using
+// the shorter `matches` slice embedded in /api/me/profile; this endpoint is
+// used only when the visitor opens the full-history page.
+//
+// Query params:
+//   limit  — clamped to [1, 100]; defaults to 50. Bad values fall back to 50
+//            rather than 400-ing.
+//   offset — clamped to >= 0; defaults to 0.
+app.get('/api/me/matches', async (c) => {
+  const auth = createAuth(c.env)
+  const session = await auth.api.getSession({ headers: c.req.raw.headers })
+  if (!session?.user?.id) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+  const userId = session.user.id
+  const limit = Math.min(
+    100,
+    Math.max(1, Number(c.req.query('limit') ?? 50) || 50),
+  )
+  const offset = Math.max(0, Number(c.req.query('offset') ?? 0) || 0)
+  const db = createDb(c.env.DB)
+  const history = await getUserMatchHistory(db, userId, limit, offset)
+  return c.json({
+    matches: history.map((m) => ({
+      matchId: m.matchId,
+      startedAt: m.startedAt.getTime(),
+      endedAt: m.endedAt.getTime(),
+      seatCount: m.seatCount,
+      finishingPosition: m.finishingPosition,
+      ratingChange:
+        conservativeRating(m.muAfter, m.sigmaAfter) -
+        conservativeRating(m.muBefore, m.sigmaBefore),
+    })),
+    limit,
+    offset,
+  })
+})
+
 // One match's final summary — standings, per-seat rating deltas. Better Auth
 // session-gated AND participant-only: match history is readable only by the
 // players who were in it (SKILL.md § 3.6). A non-participant gets 403, and

@@ -5,7 +5,7 @@ import { notFound } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Card, CardContent } from '@/components/ui/card'
-import { GAME_SERVER_HTTP } from '@/lib/config'
+import { fetchWorker } from '@/lib/worker-fetch'
 import { cn, ordinal } from '@/lib/utils'
 import { ProfileCrest } from '../profile-crest'
 import { ProfileCrestView } from '../profile-crest-view'
@@ -49,39 +49,34 @@ interface ProfileData {
 }
 
 // The viewer's own profile (with match history). 'unauthorized' = no valid
-// session; null = the Worker errored.
+// session; null = the Worker reachable but returned something unexpected.
+// Network / 5xx failures redirect to /maintenance inside fetchWorker and
+// never surface here.
 async function fetchOwnProfile(
   cookie: string,
 ): Promise<ProfileData | 'unauthorized' | null> {
-  try {
-    const res = await fetch(`${GAME_SERVER_HTTP}/api/me/profile`, {
-      headers: { cookie },
-      cache: 'no-store',
-    })
-    if (res.status === 401) return 'unauthorized'
-    if (!res.ok) return null
-    return (await res.json()) as ProfileData
-  } catch {
-    return null
-  }
+  const res = await fetchWorker('/api/me/profile', {
+    headers: { cookie },
+    cache: 'no-store',
+  })
+  if (res.status === 401) return 'unauthorized'
+  if (!res.ok) return null
+  return (await res.json()) as ProfileData
 }
 
 // Any player's public profile. 'not-found' = no such user; null = the Worker
-// errored.
+// reachable but returned something unexpected. Network / 5xx → /maintenance
+// inside fetchWorker.
 async function fetchPublicProfile(
   userId: string,
 ): Promise<ProfileData | 'not-found' | null> {
-  try {
-    const res = await fetch(
-      `${GAME_SERVER_HTTP}/api/profile/${encodeURIComponent(userId)}`,
-      { cache: 'no-store' },
-    )
-    if (res.status === 404) return 'not-found'
-    if (!res.ok) return null
-    return (await res.json()) as ProfileData
-  } catch {
-    return null
-  }
+  const res = await fetchWorker(
+    `/api/profile/${encodeURIComponent(userId)}`,
+    { cache: 'no-store' },
+  )
+  if (res.status === 404) return 'not-found'
+  if (!res.ok) return null
+  return (await res.json()) as ProfileData
 }
 
 // Fixed ISO date (YYYY-MM-DD) — locale/timezone-stable for server rendering.
@@ -141,7 +136,17 @@ function ProfileBody({
       {isOwner && (
         <Card>
           <CardContent className="flex flex-col gap-3">
-            <SectionTitle>Recent matches</SectionTitle>
+            <div className="flex items-end justify-between gap-3">
+              <SectionTitle>Recent matches</SectionTitle>
+              {matches.length > 0 && (
+                <Link
+                  href={`/profile/${user.userId}/history`}
+                  className="shrink-0 text-xs font-medium tracking-wide text-muted-foreground transition-colors hover:text-gold"
+                >
+                  View all &rarr;
+                </Link>
+              )}
+            </div>
             {matches.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted-foreground">
                 No matches played yet.

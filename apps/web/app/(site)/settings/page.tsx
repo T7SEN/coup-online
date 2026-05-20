@@ -6,7 +6,7 @@ import { ChevronRight } from 'lucide-react'
 import { OrnamentDivider } from '@/components/site/ornament-divider'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Card, CardContent } from '@/components/ui/card'
-import { GAME_SERVER_HTTP } from '@/lib/config'
+import { fetchWorker } from '@/lib/worker-fetch'
 import { DeleteAccountCard, SignOutButton } from './settings-actions'
 
 // Account settings. Server Component: forwards the session cookie to the
@@ -26,20 +26,18 @@ interface AccountData {
   providers: string[]
 }
 
+// Network / 5xx → /maintenance inside fetchWorker. null here only means the
+// Worker returned an unexpected non-OK 4xx other than 401.
 async function fetchAccount(
   cookie: string,
 ): Promise<AccountData | 'unauthorized' | null> {
-  try {
-    const res = await fetch(`${GAME_SERVER_HTTP}/api/me/account`, {
-      headers: { cookie },
-      cache: 'no-store',
-    })
-    if (res.status === 401) return 'unauthorized'
-    if (!res.ok) return null
-    return (await res.json()) as AccountData
-  } catch {
-    return null
-  }
+  const res = await fetchWorker('/api/me/account', {
+    headers: { cookie },
+    cache: 'no-store',
+  })
+  if (res.status === 401) return 'unauthorized'
+  if (!res.ok) return null
+  return (await res.json()) as AccountData
 }
 
 // Locale/timezone-stable date for server rendering.

@@ -53,6 +53,22 @@ const FOLIOS: Folio[] = [
         text: 'A public Chronicle (this page) — every release added to the project will be logged here from now on.',
       },
       {
+        tag: 'Added',
+        text: 'A dedicated full match-history page (/profile/[userId]/history) — your last fifty seats at the table, with date, length, and rating delta per row. Owner-only by construction.',
+      },
+      {
+        tag: 'Added',
+        text: 'A /maintenance fallback — the "court in recess" scene the site can fall back to when the game server is unreachable. Self-contained: no network calls, so it renders when nothing else can.',
+      },
+      {
+        tag: 'Added',
+        text: 'Every Server-rendered page now redirects to /maintenance when the game server is unreachable (network failure or 5xx). The play hub probes the Worker before rendering too, so the visitor never sees the empty hub when no game can actually be created.',
+      },
+      {
+        tag: 'Refined',
+        text: 'The site now uses a slim gold scrollbar in place of the default browser one.',
+      },
+      {
         tag: 'Refined',
         text: 'The top bar now compacts almost immediately on scroll, so it no longer covers the page header on shallow pages.',
       },
