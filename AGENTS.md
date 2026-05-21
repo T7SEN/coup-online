@@ -11,7 +11,7 @@ Read in this order:
    - § 0 — pre-flight checklist (run every request)
    - § 1 — product context, banned features
    - § 2 — tech stack baseline and substitution discipline (versions are not locked; substitutions are)
-   - § 3 — architectural pillars (server authority, state machine, DOs, matchmaking, reconnection, TrueSkill, no-PWA)
+   - § 3 — architectural pillars (server authority, state machine, DOs, matchmaking [v2 scope — stub in v1], reconnection, TrueSkill, no-PWA)
    - § 4 — Coup rules of record (deck, actions, blocks, challenges, win condition)
    - § 5 — auto-applied patterns
    - § 6 — anti-hallucination inventory
@@ -28,6 +28,7 @@ Read in this order:
    - [`deployment.md`](./references/deployment.md) — Vercel + Cloudflare deploy workflow, env vars, secrets, free-tier limits, monetization migration. Read when touching deploy config or secrets.
    - [`design-system.md`](./references/design-system.md) — the Renaissance-court visual system: shadcn/ui, colour / type tokens, component conventions. Read when building or restyling UI.
    - [`animations.md`](./references/animations.md) — the GSAP motion layer: `useGSAP`, the `Glow` / particle / timer-ring primitives, the two-faced flip card. Read when touching animations.
+   - [`launch-checklist.md`](./references/launch-checklist.md) — pre-launch runbook. E2E gameplay test plan, OAuth + Resend setup, secrets verification, mobile pass, day-one monitoring. Read before tagging any major release.
 3. **`memory/MEMORY.md`** — user-specific working rules (loaded automatically from `~/.claude/projects/.../memory/`). Currently contains the documentation-discipline rule and the three-gate verification rule.
 
 ## Mandatory verification on every code change
@@ -79,7 +80,7 @@ For the full deploy / secrets / env-var workflow, see [`references/deployment.md
 | Path | What lives here | Deep reference |
 |---|---|---|
 | `apps/web/` | Next.js 16 frontend (Vercel Hobby) — lobby page + `room/[matchId]` with WS-driven game UI; typed WS client in `lib/ws-client.ts` | [`design-system.md`](./references/design-system.md), [`animations.md`](./references/animations.md) |
-| `apps/game-server/` | Cloudflare Worker + Hono router (`/health`, `/api/auth/*`, `/api/ws-token`, `/api/ws`) + Better Auth (Drizzle adapter → D1) + GameRoom DO (full impl) + MatchmakingQueue / RoomCodeRegistry stubs + D1 binding | [`durable-objects.md`](./references/durable-objects.md), [`state-machine.md`](./references/state-machine.md), [`auth.md`](./references/auth.md) |
+| `apps/game-server/` | Cloudflare Worker + Hono router (`/health`, `/api/auth/*`, `/api/ws-token`, `/api/ws`) + Better Auth (Drizzle adapter → D1) + GameRoom DO (full impl) + MatchmakingQueue / RoomCodeRegistry stubs (v2 scope; bindings stay so the migration tag doesn't change) + D1 binding | [`durable-objects.md`](./references/durable-objects.md), [`state-machine.md`](./references/state-machine.md), [`auth.md`](./references/auth.md) |
 | `packages/protocol/` | Zod schemas for every WebSocket message + `PlayerView` type | [`state-machine.md`](./references/state-machine.md) for the contract |
 | `packages/game-logic/` | Pure Coup rules — actions, challenges, blocks, state machine, win condition | [`state-machine.md`](./references/state-machine.md), [`coding-patterns.md`](./references/coding-patterns.md) |
 | `packages/rating/` | TrueSkill wrapper for N-player free-for-all rating + leaderboard display | [`rating.md`](./references/rating.md) |

@@ -9,6 +9,7 @@ import { passkey } from '@better-auth/passkey'
 import { createDb } from '@coup-online/db'
 import * as schema from '@coup-online/db'
 import { jwtVerify } from 'jose'
+import { magicLinkEmail, twoFactorOtpEmail } from './emails'
 
 // Better Auth lives on the Worker (SKILL.md § 2 — D1 is Worker-exclusive).
 // The Drizzle adapter binds directly to `env.DB`; there is no HTTP-DB bridge.
@@ -180,23 +181,15 @@ export function createAuth(env: Env) {
           // generated 6-digit code Better Auth has already stored in the
           // verification table. We just need to deliver it.
           sendOTP: async ({ user, otp }) => {
-            await sendResendEmail(env, {
-              to: user.email,
-              subject: 'Your Coup Online verification code',
-              html: twoFactorOtpEmail(otp),
-              text: `Your Coup Online verification code is: ${otp}\n\nThe code expires in 3 minutes.`,
-            })
+            const { subject, html, text } = twoFactorOtpEmail(otp)
+            await sendResendEmail(env, { to: user.email, subject, html, text })
           },
         },
       }),
       magicLink({
         sendMagicLink: async ({ email, url }) => {
-          await sendResendEmail(env, {
-            to: email,
-            subject: 'Your Coup Online sign-in link',
-            html: magicLinkEmail(url),
-            text: `Sign in to Coup Online: ${url}`,
-          })
+          const { subject, html, text } = magicLinkEmail(url)
+          await sendResendEmail(env, { to: email, subject, html, text })
         },
       }),
       // Passkeys / WebAuthn (`@better-auth/passkey`). Adds a `passkey`
@@ -350,31 +343,10 @@ async function sendResendEmail(
   }
 }
 
-// Minimal HTML body. Intentionally inline — no template engine, no images,
-// no marketing. The user clicked "send me a link"; this is the link.
-function magicLinkEmail(url: string): string {
-  return `<!doctype html>
-<html><body style="font-family: system-ui, sans-serif; line-height: 1.5;">
-  <h2>Sign in to Coup Online</h2>
-  <p>Click the link below to sign in. It expires in a few minutes and only works once.</p>
-  <p><a href="${url}" style="color: #2563eb;">${url}</a></p>
-  <p style="color: #6b7280; font-size: 0.875rem;">If you didn't request this, you can ignore the email.</p>
-</body></html>`
-}
-
-// 2FA email-OTP body. Same minimalist treatment as the magic link: no
-// images, no marketing. The code is rendered large and monospaced so it's
-// easy to read across mail clients. If the user didn't request it, the
-// last line tells them what to do.
-function twoFactorOtpEmail(code: string): string {
-  return `<!doctype html>
-<html><body style="font-family: system-ui, sans-serif; line-height: 1.5;">
-  <h2>Your Coup Online verification code</h2>
-  <p>Enter this code on the verification page to finish signing in:</p>
-  <p style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.75rem; font-weight: 600; letter-spacing: 0.25em; color: #111;">${code}</p>
-  <p style="color: #6b7280; font-size: 0.875rem;">The code expires in 3 minutes. If you didn't request it, you can ignore this email — but if it keeps arriving, change your sign-in method from your account settings.</p>
-</body></html>`
-}
+// Email templates live in ./emails.ts — Renaissance-court branded HTML with
+// plain-text alternatives, dark-mode media query, and Outlook-safe
+// table-based layout. Imported as `magicLinkEmail` / `twoFactorOtpEmail` at
+// the top of this file.
 
 // ============================================================================
 // WS-upgrade JWT verification (separate from Better Auth sessions).

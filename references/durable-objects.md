@@ -11,7 +11,7 @@ SKILL.md § 3.3 (free-tier requirement).
 | Class | Wrangler binding | Scope | Status |
 |---|---|---|---|
 | `GameRoom` | `GAME_ROOM` | One DO per match, keyed by matchId via `idFromName` | ✓ implemented |
-| `MatchmakingQueue` | `MATCHMAKING_QUEUE` | One global DO for the public matchmaking queue | stub (501) |
+| `MatchmakingQueue` | `MATCHMAKING_QUEUE` | One global DO for the public matchmaking queue (v2 scope) | stub (501) |
 | `RoomCodeRegistry` | `ROOM_CODE_REGISTRY` | One global DO mapping 6-char room codes → match DO IDs | stub (501) |
 
 All three are declared as `new_sqlite_classes` in `apps/game-server/wrangler.toml`'s
@@ -500,9 +500,9 @@ pnpm --filter @coup-online/web dev
 
 ---
 
-## MatchmakingQueue + RoomCodeRegistry (planned)
+## MatchmakingQueue + RoomCodeRegistry (v2 scope)
 
-Both are still 501 stubs. SKILL.md § 3.3 / § 3.4:
+Both are 501 stubs in v1. The DO classes + bindings stay in `wrangler.toml` so v2 can flip them on without a new migration tag. SKILL.md § 3.3 / § 3.4:
 
 **`RoomCodeRegistry`** — single global DO mapping 6-char base32 codes
 (alphabet `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, no ambiguous chars) to GameRoom

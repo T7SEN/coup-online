@@ -44,7 +44,7 @@ When unsure, ask one targeted question rather than guessing. Coup's edge cases (
 | Game               | Coup (Rikki Tahta, 2012) — base game only, no expansions                                                                                                                                           |
 | Players            | 3–6 per match                                                                                                                                                                                      |
 | Pacing             | Real-time, single live session (~15 minutes typical)                                                                                                                                               |
-| Lobby              | Private rooms (6-char codes) + public matchmaking queue                                                                                                                                            |
+| Lobby              | Private rooms (6-char codes). **Public matchmaking is v2** — the `MatchmakingQueue` DO is a stub; play-hub shows it as "Coming in v2".                                                             |
 | Platform           | Web only — desktop + mobile browser                                                                                                                                                                |
 | Identity           | Persistent accounts via Better Auth (email magic link + Google + Discord). **No GitHub provider in v1.**                                                                                           |
 | Reconnection       | 30s grace, then auto-forfeit (both cards revealed, player eliminated)                                                                                                                              |
@@ -178,11 +178,13 @@ The DO:
 
 Match IDs are server-generated `crypto.randomUUID()`. Private room codes are short human-shareable codes (6 chars, base32 alphabet `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` — no ambiguous chars), mapped to DO IDs in a separate `RoomCodeRegistry` Durable Object (also SQLite-backed).
 
-### 3.4 Matchmaking — Lobby Durable Object
+### 3.4 Matchmaking — Lobby Durable Object (v2 scope)
 
-A single global `MatchmakingQueue` Durable Object holds the public queue. Players opting into public matchmaking are added with their MMR. The queue runs a periodic match-fanout (every 2s via DO Alarms) that pairs 3–6 players within an MMR band, spawns a new game DO, and notifies them via their existing WebSocket to switch rooms.
+**v1 ships with private rooms only.** The `MatchmakingQueue` Durable Object class exists in `apps/game-server/src/do-matchmaking.ts` as a stub returning 501 and is bound in `wrangler.toml` so the migration tag (`v1` SQLite class) doesn't need to change when v2 lands. The play-hub UI shows a "Coming in v2" tile for public matchmaking; private-room creation/join is the only working path in v1.
 
-Private rooms skip the queue. The host generates a code via `RoomCodeRegistry`, shares it, joiners enter the code and connect directly to the game DO. Codes expire 30 minutes after creation if no game starts.
+**v2 design (target):** a single global `MatchmakingQueue` Durable Object holds the public queue. Players opting into public matchmaking are added with their conservative TrueSkill rating (`mu − 3·sigma`). The queue runs a periodic match-fanout (every 2s via DO Alarms) that pairs 3–6 players within an MMR band (start ±100, expand ±50 per 30s waited, cap ±400), spawns a new GameRoom DO, and notifies participants via their existing WebSocket to switch rooms. References: [`references/durable-objects.md`](./references/durable-objects.md) "MatchmakingQueue + RoomCodeRegistry (planned)".
+
+**Private rooms (v1 — shipped):** the host generates a 6-char base32 code client-side via `apps/web/lib/match-code.ts::generateMatchCode()` (Web Crypto, no `RoomCodeRegistry` DO needed — `idFromName(code)` colocates everyone on the same GameRoom DO). Codes have no TTL in v1; the DO is created on first connect and is otherwise dormant. `RoomCodeRegistry` is also a stub kept for the v2 collision-check + TTL upgrade.
 
 ### 3.5 Reconnection — 30s Grace
 
@@ -552,5 +554,6 @@ This skill is the entry point. Deeper, on-demand material lives in `references/*
 | Web client design system — Renaissance-court theme, shadcn/ui, color/type tokens, component conventions                           | [`references/design-system.md`](./references/design-system.md)           |
 | GSAP animation patterns (useGSAP hook, reduced motion, the implemented animations)                                                | [`references/animations.md`](./references/animations.md)                 |
 | TrueSkill math, mu/sigma updates, N-player rating, leaderboard display formula                                                    | [`references/rating.md`](./references/rating.md)                         |
+| Pre-launch checklist — E2E gameplay, OAuth + Resend setup, secrets verification, mobile pass, day-one monitoring                  | [`references/launch-checklist.md`](./references/launch-checklist.md)     |
 
 Until a reference exists, this SKILL.md is the single source for that topic. Treat its sections as authoritative.

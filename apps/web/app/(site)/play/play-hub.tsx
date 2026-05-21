@@ -19,8 +19,9 @@ import { useSignInPopup } from '@/lib/use-sign-in'
 // The play hub — header + the three ways into a game, with a GSAP entrance
 // where the cards are "dealt" onto the table.
 //
-//   • Quick match — ranked matchmaking. The MatchmakingQueue DO is still a
-//     stub (501), so this card is informational ("coming soon"), not wired.
+//   • Quick match — ranked matchmaking. **v2 scope** (SKILL.md § 3.4) —
+//     the MatchmakingQueue DO is a 501 stub in v1, so this card is
+//     informational ("Coming in v2"), not wired.
 //   • Create a match — mints a fresh room code client-side → /room/[code].
 //   • Join a match — same, from a pasted code or invite link.
 //
@@ -198,7 +199,8 @@ export function PlayHub() {
       </header>
 
       <div className="flex flex-col gap-4">
-        {/* Quick match — matchmaking DO not built yet, so this is informational. */}
+        {/* Quick match — v2 scope (SKILL.md § 3.4). MatchmakingQueue DO is
+            a 501 stub in v1; this tile is informational. */}
         <Card data-play-card className="border border-dashed border-gold/40">
           <CardContent className="flex items-center gap-4">
             <span
@@ -213,7 +215,7 @@ export function PlayHub() {
                   Quick match
                 </h2>
                 <span className="rounded-full border border-border px-2 py-0.5 text-[0.65rem] font-medium tracking-widest text-muted-foreground uppercase">
-                  Coming soon
+                  Coming in v2
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">

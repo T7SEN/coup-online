@@ -168,7 +168,7 @@ const FOLIOS: Folio[] = [
       },
       {
         tag: 'Added',
-        text: 'TrueSkill-based ranked matchmaking with a leaderboard, profile cards, and a post-match summary.',
+        text: 'TrueSkill rating, the leaderboard, profile cards, and a post-match summary. Ranked matchmaking arrives in v2; private rooms are the v1 lobby.',
       },
       {
         tag: 'Added',
