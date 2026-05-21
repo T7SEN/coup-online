@@ -1,7 +1,9 @@
 import { and, desc, eq, like, or, sql } from 'drizzle-orm'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
+import { alias } from 'drizzle-orm/sqlite-core'
 import {
   account,
+  adminAudit,
   friendRequests,
   friends,
   matchPlayers,
@@ -464,6 +466,63 @@ export async function searchUsersForAdmin(db: Db, query: string, limit = 25) {
     )
     .orderBy(desc(user.createdAt))
     .limit(limit)
+}
+
+// ----------------------------------------------------------------------------
+// Admin audit log — append-only history of admin-write actions.
+// ----------------------------------------------------------------------------
+// Inserts are called from the Worker right after each admin action succeeds;
+// the table is never updated in place. Reads are newest-first with a small
+// page size for the admin UI.
+
+export interface InsertAdminAuditInput {
+  readonly adminUserId: string
+  readonly action: string
+  readonly targetUserId?: string | null
+  readonly payload?: string | null
+}
+
+export async function insertAdminAudit(
+  db: Db,
+  entry: InsertAdminAuditInput,
+): Promise<void> {
+  await db.insert(adminAudit).values({
+    adminUserId: entry.adminUserId,
+    action: entry.action,
+    targetUserId: entry.targetUserId ?? null,
+    payload: entry.payload ?? null,
+  })
+}
+
+// Paginated audit-log read for the admin console. Joins user twice (alias)
+// to surface both the admin's and the target's display name in one query —
+// avoids N+1 fetches on the rendering side.
+export async function getAdminAuditLog(
+  db: Db,
+  limit = 50,
+  offset = 0,
+) {
+  const adminUser = alias(user, 'adminUser')
+  const targetUser = alias(user, 'targetUser')
+  return db
+    .select({
+      id: adminAudit.id,
+      adminUserId: adminAudit.adminUserId,
+      adminDisplayName: adminUser.displayName,
+      adminName: adminUser.name,
+      action: adminAudit.action,
+      targetUserId: adminAudit.targetUserId,
+      targetDisplayName: targetUser.displayName,
+      targetName: targetUser.name,
+      payload: adminAudit.payload,
+      createdAt: adminAudit.createdAt,
+    })
+    .from(adminAudit)
+    .leftJoin(adminUser, eq(adminUser.id, adminAudit.adminUserId))
+    .leftJoin(targetUser, eq(targetUser.id, adminAudit.targetUserId))
+    .orderBy(desc(adminAudit.createdAt))
+    .limit(limit)
+    .offset(offset)
 }
 
 // Aggregate counts for the admin overview strip. Cheap — three SELECTs over

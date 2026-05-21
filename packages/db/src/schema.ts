@@ -324,6 +324,51 @@ export const friendRequests = sqliteTable(
 )
 
 // ============================================================================
+// Admin audit log
+// ============================================================================
+// Append-only record of admin-write actions. Inserted from the admin
+// endpoints in apps/game-server (grant/revoke patron, etc.); never updated
+// in place. Used to answer "who did what, when?" after the fact.
+//
+// `payload` is JSON-encoded — defensive (parse errors don't break reads).
+// Schema kept narrow on purpose: the audit log isn't the place to mirror
+// every cosmetic, just enough to identify the action and any rank/since
+// timestamps the action set.
+
+export const adminAudit = sqliteTable(
+  'admin_audit',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => webCrypto.randomUUID()),
+    // Who performed the action. References user.id — never null (every
+    // audit row is initiated by an authenticated admin session).
+    adminUserId: text('adminUserId')
+      .notNull()
+      .references(() => user.id),
+    // Action verb — short snake_case identifier (e.g. 'grant_patron',
+    // 'revoke_patron'). Free-form so future admin actions don't need a
+    // migration to land here.
+    action: text('action').notNull(),
+    // Subject of the action. Nullable so future admin actions that aren't
+    // user-targeted (e.g. global config tweaks) can still log a row.
+    targetUserId: text('targetUserId').references(() => user.id),
+    // JSON-encoded extras. Caller decides shape per action.
+    payload: text('payload'),
+    createdAt: integer('createdAt', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (a) => ({
+    // Most reads are "newest-first, paginate" — covered by a single index
+    // on createdAt.
+    createdAtIdx: index('admin_audit_created_at_idx').on(a.createdAt),
+    // Lookups by target ("show me everything done to user X").
+    targetIdx: index('admin_audit_target_idx').on(a.targetUserId),
+  }),
+)
+
+// ============================================================================
 // Inferred row types — re-exported for consumers.
 // ============================================================================
 
@@ -345,3 +390,5 @@ export type Friend = typeof friends.$inferSelect
 export type NewFriend = typeof friends.$inferInsert
 export type FriendRequest = typeof friendRequests.$inferSelect
 export type NewFriendRequest = typeof friendRequests.$inferInsert
+export type AdminAudit = typeof adminAudit.$inferSelect
+export type NewAdminAudit = typeof adminAudit.$inferInsert

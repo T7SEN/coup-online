@@ -4,8 +4,10 @@ import { cors } from 'hono/cors'
 import {
   createDb,
   deleteUserAccount,
+  getAdminAuditLog,
   getAdminStats,
   getFoundingPatrons,
+  insertAdminAudit,
   getLeaderboardTop100,
   getMatchById,
   getMatchParticipants,
@@ -1277,6 +1279,50 @@ app.get('/api/admin/users', async (c) => {
   })
 })
 
+// Admin audit log — newest-first, paginated. Every grant_patron /
+// revoke_patron write inserts a row; this endpoint reads them back for the
+// /admin page's "Audit log" section. Payload is JSON-encoded text in the
+// DB; we pass it through as a parsed value when it round-trips cleanly,
+// or as the raw string otherwise (never throws on bad payload).
+app.get('/api/admin/audit', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const limit = Math.min(
+    100,
+    Math.max(1, Number(c.req.query('limit') ?? 50) || 50),
+  )
+  const offset = Math.max(0, Number(c.req.query('offset') ?? 0) || 0)
+  const db = createDb(c.env.DB)
+  const rows = await getAdminAuditLog(db, limit, offset)
+  return c.json({
+    entries: rows.map((r) => {
+      // Best-effort payload parse — corrupt JSON shouldn't break the read.
+      let payload: unknown = null
+      if (r.payload) {
+        try {
+          payload = JSON.parse(r.payload)
+        } catch {
+          payload = { raw: r.payload }
+        }
+      }
+      return {
+        id: r.id,
+        adminUserId: r.adminUserId,
+        adminDisplayName:
+          r.adminDisplayName?.trim() || r.adminName || 'Unknown',
+        action: r.action,
+        targetUserId: r.targetUserId,
+        targetDisplayName:
+          r.targetDisplayName?.trim() || r.targetName || null,
+        payload,
+        createdAt: r.createdAt.getTime(),
+      }
+    }),
+    limit,
+    offset,
+  })
+})
+
 // Grant patronage to a user. Idempotent (the underlying helper is). Assigns a
 // founder rank automatically if there are fewer than 10 founders.
 app.post('/api/admin/users/:userId/grant-patron', async (c) => {
@@ -1293,6 +1339,19 @@ app.post('/api/admin/users/:userId/grant-patron', async (c) => {
   if (!target) return c.json({ error: 'user_not_found' }, 404)
   await grantPatronage(db, targetId)
   const next = await getUserById(db, targetId)
+  // Audit log — append a row capturing who granted what. Payload records
+  // the resulting founderRank + patronSince so a later reader can tell
+  // whether this grant minted a new founder slot or was idempotent.
+  await insertAdminAudit(db, {
+    adminUserId: adminId,
+    action: 'grant_patron',
+    targetUserId: targetId,
+    payload: JSON.stringify({
+      founderRank: next?.founderRank ?? null,
+      patronSince: next?.patronSince?.getTime() ?? null,
+      wasAlreadyPatron: target.isPatron === true,
+    }),
+  })
   return c.json({
     userId: next?.id,
     isPatron: next?.isPatron ?? false,
@@ -1322,6 +1381,17 @@ app.post('/api/admin/users/:userId/revoke-patron', async (c) => {
   // Best-effort R2 cleanup — idempotent if the object doesn't exist.
   await c.env.AVATARS.delete(`banners/${targetId}`)
   const next = await getUserById(db, targetId)
+  // Audit log — record the revoke. Payload preserves the founder rank
+  // they're keeping (revoke leaves founderRank intact by design).
+  await insertAdminAudit(db, {
+    adminUserId: adminId,
+    action: 'revoke_patron',
+    targetUserId: targetId,
+    payload: JSON.stringify({
+      founderRankRetained: next?.founderRank ?? null,
+      wasAlreadyNonPatron: target.isPatron === false,
+    }),
+  })
   return c.json({
     userId: next?.id,
     isPatron: next?.isPatron ?? false,

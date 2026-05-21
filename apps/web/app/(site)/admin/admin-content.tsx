@@ -1,7 +1,17 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Crown, Loader2, Search, Sparkles, X } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Crown,
+  Loader2,
+  RefreshCw,
+  ScrollText,
+  Search,
+  Sparkles,
+  X,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -40,11 +50,49 @@ interface AdminUser {
   createdAt: number
 }
 
+// One row out of GET /api/admin/audit. `payload` is whatever JSON the
+// emitter encoded; `{ raw: string }` shape lets the UI render unparseable
+// values without crashing.
+interface AdminAuditEntry {
+  id: string
+  adminUserId: string
+  adminDisplayName: string
+  action: string
+  targetUserId: string | null
+  targetDisplayName: string | null
+  payload: unknown
+  createdAt: number
+}
+
 const FOUNDER_LIMIT = 10
 const SEARCH_DEBOUNCE_MS = 250
+const AUDIT_PAGE_SIZE = 25
 
 function isoDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10)
+}
+
+// "2026-05-21 14:23 UTC" — locale/zone-stable string for the audit timeline.
+function auditTimestamp(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number) => (n < 10 ? `0${n}` : String(n))
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(
+    d.getUTCDate(),
+  )} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`
+}
+
+// Map raw action verbs to readable labels. Unknown actions show the raw
+// string so a new admin action lands in the UI immediately without a code
+// change here.
+const ACTION_LABEL: Record<string, string> = {
+  grant_patron: 'Granted patron',
+  revoke_patron: 'Revoked patron',
+}
+
+// Visual tone for each action — gold for grants, neutral for revokes, etc.
+const ACTION_TONE: Record<string, string> = {
+  grant_patron: 'border-gold/55 bg-gold/10 text-gold',
+  revoke_patron: 'border-border bg-muted text-muted-foreground',
 }
 
 function StatTile({ label, value }: { label: string; value: string }) {
@@ -69,6 +117,16 @@ export function AdminConsole({
   const [searching, setSearching] = useState(false)
   const [pendingId, setPendingId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Audit log — paginated, newest-first. Page size matches the Worker's
+  // default (the Worker accepts ?limit=&offset= so we could request more,
+  // but a 25-row page renders cleanly).
+  const [auditEntries, setAuditEntries] = useState<AdminAuditEntry[]>([])
+  const [auditOffset, setAuditOffset] = useState(0)
+  const [auditLoading, setAuditLoading] = useState(true)
+  const [auditError, setAuditError] = useState<string | null>(null)
+  const [auditHasMore, setAuditHasMore] = useState(false)
+  // Per-entry expand state for the payload JSON view.
+  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null)
 
   // Stats refresh — pulled after any grant/revoke so the strip stays honest.
   const refreshStats = useCallback(async () => {
@@ -80,6 +138,43 @@ export function AdminConsole({
       // silent — the existing strip stays
     }
   }, [])
+
+  // Load a page of audit entries. `replace = true` resets the list (first
+  // page or refresh); `replace = false` appends (Load more). Errors land in
+  // `auditError` for inline display.
+  const loadAudit = useCallback(
+    async (offset: number, replace: boolean) => {
+      setAuditLoading(true)
+      setAuditError(null)
+      try {
+        const res = await fetch(
+          `/api/admin/audit?limit=${AUDIT_PAGE_SIZE}&offset=${offset}`,
+          { cache: 'no-store' },
+        )
+        if (!res.ok) throw new Error(`audit_${res.status}`)
+        const json = (await res.json()) as { entries: AdminAuditEntry[] }
+        setAuditEntries((cur) =>
+          replace ? json.entries : [...cur, ...json.entries],
+        )
+        setAuditOffset(offset + json.entries.length)
+        // If we got fewer than a page back, we've hit the end.
+        setAuditHasMore(json.entries.length >= AUDIT_PAGE_SIZE)
+      } catch {
+        setAuditError('Could not load the audit log.')
+      } finally {
+        setAuditLoading(false)
+      }
+    },
+    [],
+  )
+
+  // First-load: pull the most recent page on mount. Deferred via setTimeout
+  // so the synchronous state setters inside loadAudit don't trip the
+  // react-hooks/set-state-in-effect rule.
+  useEffect(() => {
+    const t = window.setTimeout(() => void loadAudit(0, true), 0)
+    return () => window.clearTimeout(t)
+  }, [loadAudit])
 
   // Debounced search. Every state setter runs inside an async callback
   // (setTimeout or fetch.then) rather than synchronously in the effect body
@@ -158,6 +253,8 @@ export function AdminConsole({
             : `Patronage revoked from ${user.displayName}.`,
         )
         void refreshStats()
+        // Refresh the audit log so the new row is at the top immediately.
+        void loadAudit(0, true)
       } catch {
         toast.error(
           action === 'grant'
@@ -168,7 +265,7 @@ export function AdminConsole({
         setPendingId(null)
       }
     },
-    [refreshStats],
+    [refreshStats, loadAudit],
   )
 
   return (
@@ -319,6 +416,135 @@ export function AdminConsole({
               )
             })}
           </ol>
+        )}
+      </section>
+
+      {/* Audit log — newest-first record of admin writes. */}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 font-display text-lg tracking-wide">
+            <ScrollText className="size-4 text-gold/80" aria-hidden />
+            Audit log
+          </h2>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void loadAudit(0, true)}
+            disabled={auditLoading}
+            className="text-muted-foreground hover:text-foreground"
+            aria-label="Refresh audit log"
+          >
+            <RefreshCw
+              className={cn(
+                'size-3.5',
+                auditLoading && 'animate-spin',
+              )}
+              aria-hidden
+            />
+          </Button>
+        </div>
+
+        {auditError ? (
+          <Alert variant="destructive">
+            <AlertTitle>{auditError}</AlertTitle>
+            <AlertDescription>
+              Try refreshing — the Worker may have been briefly unreachable.
+            </AlertDescription>
+          </Alert>
+        ) : auditEntries.length === 0 && !auditLoading ? (
+          <p className="rounded-md border border-dashed border-gold/25 bg-card/40 px-4 py-6 text-center text-sm text-muted-foreground">
+            No admin actions logged yet.
+          </p>
+        ) : (
+          <ol className="flex flex-col gap-1.5">
+            {auditEntries.map((e) => {
+              const label = ACTION_LABEL[e.action] ?? e.action
+              const tone =
+                ACTION_TONE[e.action] ?? 'border-border text-foreground'
+              const isExpanded = expandedAuditId === e.id
+              const hasPayload =
+                e.payload != null &&
+                typeof e.payload === 'object' &&
+                Object.keys(e.payload as object).length > 0
+              return (
+                <li
+                  key={e.id}
+                  className="flex flex-col gap-2 rounded-md border border-border bg-card px-3 py-2.5 text-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={cn(
+                        'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 font-display text-[10px] tracking-[0.18em] uppercase',
+                        tone,
+                      )}
+                    >
+                      {label}
+                    </span>
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <p className="truncate">
+                        <span className="font-medium">
+                          {e.adminDisplayName}
+                        </span>
+                        {e.targetDisplayName && (
+                          <>
+                            <span className="text-muted-foreground"> → </span>
+                            <span className="font-medium">
+                              {e.targetDisplayName}
+                            </span>
+                          </>
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {auditTimestamp(e.createdAt)}
+                      </p>
+                    </div>
+                    {hasPayload && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedAuditId(isExpanded ? null : e.id)
+                        }
+                        aria-expanded={isExpanded}
+                        aria-label={
+                          isExpanded ? 'Hide payload' : 'Show payload'
+                        }
+                        className="shrink-0 cursor-pointer rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="size-4" />
+                        ) : (
+                          <ChevronRight className="size-4" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  {hasPayload && isExpanded && (
+                    <pre className="mt-1 max-h-48 overflow-auto rounded-sm border border-border bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+                      {JSON.stringify(e.payload, null, 2)}
+                    </pre>
+                  )}
+                </li>
+              )
+            })}
+          </ol>
+        )}
+
+        {auditEntries.length > 0 && auditHasMore && (
+          <div className="flex justify-center">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={auditLoading}
+              onClick={() => void loadAudit(auditOffset, false)}
+            >
+              {auditLoading ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+              ) : null}
+              Load more
+            </Button>
+          </div>
         )}
       </section>
 
