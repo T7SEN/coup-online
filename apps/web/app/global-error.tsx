@@ -25,15 +25,29 @@ export default function GlobalError({
     <html lang="en">
       <body className="antialiased">
         <main className="mx-auto flex min-h-svh max-w-md flex-col items-center justify-center gap-4 p-6 text-center">
-          <h1 className="font-display text-2xl tracking-wide text-primary">
+          {/* Typography-only wordmark. next/font variables aren't loaded here
+              so we can't rely on Cinzel; the inline letter-spacing + caps make
+              it recognizable even on the serif fallback. */}
+          <p className="text-xs font-bold tracking-[0.4em] text-primary uppercase">
+            Coup Online
+          </p>
+          <h1 className="font-display text-2xl tracking-wide text-foreground">
             Something went wrong
           </h1>
           <p className="text-sm text-muted-foreground">
-            An unexpected error occurred and has been reported. Try again, or
-            return to the lobby.
+            We hit an unexpected error loading the page. It&rsquo;s been
+            reported. Try again, or head back to the court.
           </p>
-          <div className="flex gap-2">
+          {/* Production digest — what the user should quote when reporting.
+              Only rendered when Next.js provides one (production builds). */}
+          {error.digest && (
+            <p className="font-mono text-[11px] tracking-wider text-muted-foreground/70">
+              Reference: {error.digest}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <button
+              type="button"
               onClick={() => reset()}
               className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
             >
@@ -44,9 +58,9 @@ export default function GlobalError({
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/"
-              className="rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium"
+              className="rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground"
             >
-              Back to lobby
+              Back to the court
             </a>
           </div>
         </main>
