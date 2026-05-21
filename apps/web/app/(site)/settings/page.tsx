@@ -8,7 +8,9 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Card, CardContent } from '@/components/ui/card'
 import { fetchWorker } from '@/lib/worker-fetch'
 import { DeleteAccountCard, SignOutButton } from './settings-actions'
+import { PasskeysCard } from './passkeys-card'
 import { PatronageCard, type PatronStorefront } from './patronage-card'
+import { TwoFactorCard } from './two-factor-card'
 
 // Account settings. Server Component: forwards the session cookie to the
 // Worker's /api/me/account (D1 is Worker-owned). No session → sign-in. The
@@ -25,6 +27,8 @@ interface AccountData {
   displayName: string
   joinedAt: number
   providers: string[]
+  twoFactorEnabled: boolean
+  passkeyCount: number
   patron: PatronStorefront
 }
 
@@ -104,6 +108,14 @@ function SettingsBody({ data }: { data: AccountData }) {
           </Link>
         </CardContent>
       </Card>
+
+      {/* Two-factor authentication. */}
+      <TwoFactorCard initiallyEnabled={data.twoFactorEnabled} />
+
+      {/* Passkeys (WebAuthn). Sits next to 2FA — both are sign-in
+          hardening; passkeys are an alternative primary credential
+          and skip 2FA on sign-in (they're inherently multi-factor). */}
+      <PasskeysCard initialCount={data.passkeyCount} />
 
       {/* Patronage. */}
       <PatronageCard initialPatron={data.patron} />

@@ -12,6 +12,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@better-auth/passkey": "^1.6.11",
     "@coup-online/db": "workspace:*",
     "@coup-online/game-logic": "workspace:*",
     "@coup-online/protocol": "workspace:*",

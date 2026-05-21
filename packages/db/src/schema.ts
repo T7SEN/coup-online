@@ -108,6 +108,14 @@ export const user = sqliteTable('user', {
   updatedAt: integer('updatedAt', { mode: 'timestamp_ms' })
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
+  // Better Auth twoFactor plugin marker — when true, sign-ins require a
+  // TOTP challenge after provider auth completes. The actual secret +
+  // backup codes live in the `twoFactor` table below; this flag is the
+  // user-row pointer the plugin uses to decide whether to issue the
+  // challenge.
+  twoFactorEnabled: integer('twoFactorEnabled', { mode: 'boolean' })
+    .notNull()
+    .default(false),
 }, (u) => ({
   // Vanity slug must be unique across users. SQLite treats every NULL in a
   // unique index as distinct, so unset slugs never collide.
@@ -193,6 +201,96 @@ export const verification = sqliteTable(
   },
   (v) => ({
     identifierIdx: index('verification_identifier_idx').on(v.identifier),
+  }),
+)
+
+// Better Auth twoFactor plugin. One row per user that has enrolled 2FA.
+// `secret` is the TOTP secret (Base32); `backupCodes` is JSON-encoded array
+// of one-time backup codes. `verified` flips to true after the user proves
+// they can read the secret with their authenticator (the enrolment-time
+// verifyTotp call); until then 2FA is NOT enforced on sign-ins. See
+// apps/game-server/src/auth.ts for the plugin config.
+export const twoFactor = sqliteTable(
+  'twoFactor',
+  {
+    id: text('id').primaryKey(),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    secret: text('secret').notNull(),
+    backupCodes: text('backupCodes').notNull(),
+    verified: integer('verified', { mode: 'boolean' }).notNull().default(true),
+  },
+  (t) => ({
+    userIdIdx: index('twoFactor_userId_idx').on(t.userId),
+    secretIdx: index('twoFactor_secret_idx').on(t.secret),
+  }),
+)
+
+// Better Auth passkey plugin (`@better-auth/passkey`). One row per
+// registered WebAuthn credential — a single user can have many (phone,
+// laptop, security key, etc.). Column shape dictated by the plugin's
+// `src/schema.ts` — keep the names exact or the Drizzle adapter won't
+// find the fields it expects. Sign-in via passkey is its own ceremony
+// (a possession-factor + biometric/PIN), so it produces a full session
+// and bypasses 2FA — that's a property of WebAuthn, not a workaround.
+export const passkey = sqliteTable(
+  'passkey',
+  {
+    id: text('id').primaryKey(),
+    // User-supplied label like "iPhone Touch ID" — shown in /settings.
+    // Optional; the plugin tolerates NULL and falls back to a generic UI
+    // string.
+    name: text('name'),
+    // Base64URL-encoded credential public key. Required.
+    publicKey: text('publicKey').notNull(),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Base64URL-encoded WebAuthn credential ID. Looked up on every
+    // sign-in attempt — gets its own index. Not declared unique here
+    // because the plugin enforces uniqueness at the application layer
+    // (matching the plugin's own schema declaration).
+    credentialID: text('credentialID').notNull(),
+    // WebAuthn signature counter — replay-detection. Monotonically
+    // increments on every successful authentication.
+    counter: integer('counter').notNull(),
+    // 'singleDevice' | 'multiDevice' — flagged by the authenticator
+    // (e.g. iCloud-synced credentials are 'multiDevice').
+    deviceType: text('deviceType').notNull(),
+    // Whether the credential is backed up to a cloud provider
+    // (iCloud Keychain, Google Password Manager, …).
+    backedUp: integer('backedUp', { mode: 'boolean' }).notNull(),
+    // Comma-separated transports list ("internal,hybrid", "usb,nfc", …).
+    transports: text('transports'),
+    // Authenticator AAGUID — opaque identifier for the authenticator
+    // make/model. Optional; recent WebAuthn additions.
+    aaguid: text('aaguid'),
+    createdAt: integer('createdAt', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (p) => ({
+    userIdIdx: index('passkey_userId_idx').on(p.userId),
+    credentialIdIdx: index('passkey_credentialID_idx').on(p.credentialID),
+  }),
+)
+
+// Better Auth built-in rate limiting (configured with `storage: 'database'`
+// in createAuth). One row per `{ip + endpoint}` key; `count` and
+// `lastRequest` are updated in place by the auth runtime. Better Auth
+// auto-creates this if missing on the live DB, but Drizzle still needs the
+// shape declared so generated migrations match.
+export const rateLimit = sqliteTable(
+  'rateLimit',
+  {
+    id: text('id').primaryKey(),
+    key: text('key').notNull().unique(),
+    count: integer('count').notNull().default(0),
+    lastRequest: integer('lastRequest').notNull(),
+  },
+  (r) => ({
+    keyIdx: index('rateLimit_key_idx').on(r.key),
   }),
 )
 
@@ -392,3 +490,9 @@ export type FriendRequest = typeof friendRequests.$inferSelect
 export type NewFriendRequest = typeof friendRequests.$inferInsert
 export type AdminAudit = typeof adminAudit.$inferSelect
 export type NewAdminAudit = typeof adminAudit.$inferInsert
+export type TwoFactor = typeof twoFactor.$inferSelect
+export type NewTwoFactor = typeof twoFactor.$inferInsert
+export type RateLimit = typeof rateLimit.$inferSelect
+export type NewRateLimit = typeof rateLimit.$inferInsert
+export type Passkey = typeof passkey.$inferSelect
+export type NewPasskey = typeof passkey.$inferInsert

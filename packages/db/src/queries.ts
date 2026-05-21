@@ -9,7 +9,9 @@ import {
   matchPlayers,
   matches,
   mmrHistory,
+  passkey,
   session,
+  twoFactor,
   user,
   type NewMatch,
   type NewMatchPlayer,
@@ -104,6 +106,10 @@ export async function deleteUserAccount(
   await db.batch([
     db.delete(account).where(eq(account.userId, userId)),
     db.delete(session).where(eq(session.userId, userId)),
+    // 2FA enrollment + WebAuthn credentials are sign-in paths — purge them
+    // so the anonymised identity truly cannot sign in again.
+    db.delete(twoFactor).where(eq(twoFactor.userId, userId)),
+    db.delete(passkey).where(eq(passkey.userId, userId)),
     db
       .delete(friends)
       .where(
@@ -139,9 +145,23 @@ export async function deleteUserAccount(
         patronVanityRoomCode: null,
         patronShimmerBanner: false,
         patronVictoryFlourish: false,
+        // Drop the 2FA pointer too — the row in `twoFactor` is already gone
+        // above; flipping this back to false matches the post-delete state.
+        twoFactorEnabled: false,
       })
       .where(eq(user.id, userId)),
   ])
+}
+
+// Count enrolled passkeys for a user — surfaced on /api/me/account so the
+// Settings page can show the right state (zero passkeys: "Add a passkey";
+// N passkeys: list them). Cheap one-row aggregate.
+export async function countUserPasskeys(db: Db, userId: string): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(passkey)
+    .where(eq(passkey.userId, userId))
+  return Number(rows[0]?.n ?? 0)
 }
 
 // ----------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/cloudflare'
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import {
+  countUserPasskeys,
   createDb,
   deleteUserAccount,
   getAdminAuditLog,
@@ -1129,9 +1130,10 @@ app.get('/api/me/account', async (c) => {
     return c.json({ error: 'unauthorized' }, 401)
   }
   const db = createDb(c.env.DB)
-  const [me, providers] = await Promise.all([
+  const [me, providers, passkeyCount] = await Promise.all([
     getUserById(db, session.user.id),
     getUserAccountProviders(db, session.user.id),
+    countUserPasskeys(db, session.user.id),
   ])
   if (!me) {
     return c.json({ error: 'user_not_found' }, 404)
@@ -1144,6 +1146,13 @@ app.get('/api/me/account', async (c) => {
     // Empty for a magic-link-only account (no `account` row) — the client
     // renders that as "Email link".
     providers,
+    // 2FA marker — Settings reads this to render the right enrolled /
+    // not-enrolled state in the TwoFactorCard.
+    twoFactorEnabled: me.twoFactorEnabled,
+    // Passkey count — Settings's PasskeysCard pre-renders the right state
+    // ("No passkeys yet" vs "N passkeys") on first paint, then the
+    // reactive `useListPasskeys()` hook takes over for live updates.
+    passkeyCount,
     // Full patron storefront — the Settings page reads this to render both
     // the read-only markers (status, founder rank, since) and the editable
     // controls (motto, slug, gilded, shimmer, victory flourish, …). Edits

@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { MailCheck } from 'lucide-react'
+import { Fingerprint, MailCheck } from 'lucide-react'
 import { Logo } from '@/components/logo'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -85,6 +85,28 @@ function SignInForm() {
     setSent(true)
   }
 
+  // Passkey (WebAuthn) sign-in — the user-agent prompts for any
+  // credential registered against this rpID. Successful ceremony writes
+  // a full session; 2FA is bypassed (passkeys ARE multi-factor:
+  // possession + biometric/PIN). Falls back gracefully when the browser
+  // has no matching credential — the toast shows the plugin's error
+  // message rather than a stuck spinner.
+  async function handlePasskey() {
+    setError(null)
+    setBusy(true)
+    const res = await authClient.signIn.passkey()
+    if (res?.error) {
+      setBusy(false)
+      const message = res.error.message ?? 'Could not sign in with passkey.'
+      setError(message)
+      return
+    }
+    // On success the Better Auth client has already set the session
+    // cookie. Hard-navigate to the callback page so every Server
+    // Component reads it fresh.
+    window.location.href = '/auth/callback'
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 p-6">
       <header className="flex flex-col items-center gap-3 text-center">
@@ -118,6 +140,17 @@ function SignInForm() {
             disabled={busy}
           >
             Continue with Discord
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            onClick={() => void handlePasskey()}
+            disabled={busy}
+          >
+            <Fingerprint className="mr-1.5 size-4" aria-hidden />
+            Sign in with a passkey
           </Button>
 
           <div className="flex items-center gap-3">
