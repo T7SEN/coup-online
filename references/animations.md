@@ -1,7 +1,8 @@
 # Animations — GSAP motion
 
-The web client's motion layer. Companion to SKILL.md § 2 (GSAP in the locked
-stack) and [`design-system.md`](./design-system.md). Lives in `apps/web`.
+The web client's motion layer. Companion to SKILL.md § 2 (GSAP as the chosen
+animation lib — substituting Framer Motion / `motion` is out) and
+[`design-system.md`](./design-system.md). Lives in `apps/web`.
 
 > **Status — motion is ON.** `MOTION_ENABLED` in `components/motion.tsx` is
 > `true`. Every animation below is implemented and gate-verified (typecheck +

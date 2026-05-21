@@ -1,6 +1,6 @@
 # Design System — Renaissance court
 
-The web client's visual layer. Companion to SKILL.md § 2 (locked stack) and
+The web client's visual layer. Companion to SKILL.md § 2 (tech stack) and
 § 3.7 (client UX). Lives in `apps/web`.
 
 ---
@@ -124,7 +124,7 @@ unified package; `lucide-react` covers icons.
 
 ## See also
 
-- **Stack lock + client UX:** [`SKILL.md`](../SKILL.md) § 2, § 3.7
+- **Tech stack + client UX:** [`SKILL.md`](../SKILL.md) § 2, § 3.7
 - **Tokens + theme:** `apps/web/app/globals.css`
 - **shadcn config:** `apps/web/components.json`
 - **Fonts + providers:** `apps/web/app/layout.tsx`

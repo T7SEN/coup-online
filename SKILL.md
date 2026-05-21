@@ -60,9 +60,17 @@ When unsure, ask one targeted question rather than guessing. Coup's edge cases (
 
 ---
 
-## 2. Tech Stack (Locked Versions)
+## 2. Tech Stack
 
-Pinned by `package.json` in each workspace. Do not upgrade as part of feature work. **All entries below are on a permanent free tier — no paid services in v1.**
+Current versions reflect each workspace's `package.json` at any given time. **Dependencies are NOT version-locked: bumps, additions, and removals are allowed when a task calls for them.** What IS still fixed:
+
+- **Substitution discipline.** The chosen libraries (GSAP not Framer Motion, Better Auth not Auth.js, Drizzle + D1 not Prisma + Neon/Postgres, TrueSkill not Glicko-2/Elo, Cloudflare Web Analytics not Vercel Analytics, SQLite-backed DOs not key-value DOs, Hono not Express/Fastify) are architectural decisions, not version pins. Section 6 (anti-hallucination) is the canonical list. Swapping one of these is a deliberate architectural choice — not a dep bump — and needs explicit discussion.
+- **Free-tier only.** Adding a paid-tier dependency or service still requires explicit pricing discussion and approval (§ 0 step 9). v1 budget is zero.
+- **Three-gate after any dep change.** `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm -r build` must all pass before reporting a bump/add/remove as done (§ 5). Bumps are the single most common source of silent regressions — gate them like any other code change.
+- **Drizzle migrations stay append-only once shipped.** Database discipline, not version discipline — survives every dep bump (§ 5).
+- **`pnpm` overrides live in `pnpm-workspace.yaml`** (pnpm 10+), not in `package.json`. Security advisories are typically resolved via overrides + `pnpm -r audit` rather than direct bumps when the consuming dep hasn't released a fix yet.
+
+When a bump is non-trivial (major version jump, breaking changes in a dep with broad surface area — e.g. Better Auth, Drizzle, Next.js, Hono), state it as its own task with a brief migration plan before making the change. **All entries below remain on a permanent free tier — no paid services in v1.**
 
 ### Frontend — `apps/web`
 

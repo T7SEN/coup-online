@@ -10,7 +10,7 @@ Read in this order:
 1. **`SKILL.md`** end-to-end — the canonical spec. Sections:
    - § 0 — pre-flight checklist (run every request)
    - § 1 — product context, banned features
-   - § 2 — locked tech stack versions
+   - § 2 — tech stack baseline and substitution discipline (versions are not locked; substitutions are)
    - § 3 — architectural pillars (server authority, state machine, DOs, matchmaking, reconnection, TrueSkill, no-PWA)
    - § 4 — Coup rules of record (deck, actions, blocks, challenges, win condition)
    - § 5 — auto-applied patterns

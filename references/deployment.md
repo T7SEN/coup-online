@@ -406,7 +406,7 @@ When the project starts taking money:
 
 ## See also
 
-- **Canonical spec for the locked stack and free-tier posture:** [`SKILL.md`](../SKILL.md) § 2 (Tech Stack — Locked Versions), § 0 step 9 (free-tier check), § 1 (cost posture)
+- **Canonical spec for the tech stack and free-tier posture:** [`SKILL.md`](../SKILL.md) § 2 (Tech Stack), § 0 step 9 (free-tier check), § 1 (cost posture)
 - **WS auth issuance + verification code (the `WS_SIGNING_SECRET` flow):** [`coding-patterns.md`](./coding-patterns.md) § 17
 - **Why each free-tier service was chosen (D1 over Neon, Cloudflare Web Analytics over Vercel, etc.):** [`anti-hallucination.md`](./anti-hallucination.md)
 - **Cloudflare Worker + DO architecture for game-server:** [`SKILL.md`](../SKILL.md) § 3.3 (Durable Object Per Room), § 3.4 (Matchmaking)

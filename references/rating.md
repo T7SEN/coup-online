@@ -191,7 +191,7 @@ native binaries — Workers-safe.
 
 ## See also
 
-- **Canonical spec:** [`SKILL.md`](../SKILL.md) § 3.6 (TrueSkill + Match Persistence), § 2 (TrueSkill in the locked stack)
+- **Canonical spec:** [`SKILL.md`](../SKILL.md) § 3.6 (TrueSkill + Match Persistence), § 2 (TrueSkill as the chosen rating lib — Elo / Glicko-2 substitutions are out)
 - **Where rating fits in the action lifecycle:** [`state-machine.md`](./state-machine.md) — the post-`GAME_OVER` flow (after `checkWinner` returns a winner, the DO's endGame() is called)
 - **Finishing-position derivation:** `computeFinishingPositions` in `packages/game-logic/src/win-condition.ts` (tested in `win-condition.test.ts`)
 - **Why TrueSkill is the only legal pick (no Elo / Glicko-2):** [`anti-hallucination.md`](./anti-hallucination.md) — Rating section

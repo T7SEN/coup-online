@@ -363,7 +363,7 @@ Before `pnpm add <thing>`, ask:
 
 1. **Does it run on Cloudflare Workers?** No `node:*` imports, no native binaries.
 2. **Is it on a permanent free tier?** Trials or credits don't count.
-3. **Does it conflict with SKILL.md § 2's locked stack?** If so, justify or refuse.
+3. **Does it violate SKILL.md § 2's substitution discipline or § 6's anti-hallucination list?** (E.g. a Postgres ORM, a Framer Motion alternative, an Elo library.) Versions are not locked, but substitutions are — if it conflicts, justify or refuse.
 4. **Is there a Workers-native alternative I missed?** Check this file's table first.
 5. **Does it pull in a paid-by-default sub-dependency?** Some auth providers, observability tools, and analytics packages have free tiers that silently expire after N events.
 
@@ -374,5 +374,5 @@ Before `pnpm add <thing>`, ask:
 - **Canonical spec:** [`SKILL.md`](../SKILL.md) § 6 (Anti-Hallucination Inventory) — the quick-lookup table this file expands
 - **How to refuse a request that asks for one of these:** [`refusal-catalog.md`](./refusal-catalog.md) — user-facing rationale + refusal templates
 - **The right pattern to reach for instead:** [`coding-patterns.md`](./coding-patterns.md) — code examples of the correct alternatives
-- **Locked stack versions:** [`SKILL.md`](../SKILL.md) § 2 (Tech Stack — Locked Versions)
+- **Tech stack baseline + substitution discipline:** [`SKILL.md`](../SKILL.md) § 2 (Tech Stack)
 - **Deployment implications of free-tier-only choices:** [`deployment.md`](./deployment.md) — the monetization migration plan covers when the choices stop being free-only
