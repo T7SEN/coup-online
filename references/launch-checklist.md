@@ -352,71 +352,145 @@ Dashboard config only — no code. The header set in `next.config.ts`
 covers the application layer; this section covers Cloudflare's edge so
 traffic is filtered before it reaches Vercel or the Worker.
 
-### 8a. HSTS — force HTTPS
-1. Cloudflare dashboard → **coups.app** → **SSL/TLS** → **Edge Certificates**
-2. **HTTP Strict Transport Security (HSTS)** → **Enable HSTS**
-3. Recommended initial settings:
-   - **Max-Age**: 6 months (180 days). Bump to 12 months after a week of no
-     issues. **Don't start at 12 months** — if something breaks you can't
-     unstick browsers that already cached the policy.
-   - **Apply HSTS policy to subdomains (includeSubDomains)**: ON (there are
-     no HTTP-only subdomains on coups.app today).
-   - **Preload**: OFF for now. Submitting to the HSTS Preload list is a
-     one-way door — removal takes months. Revisit after 6 months of stable
-     operation if you want it.
-   - **No-Sniff Header**: OFF (we already set X-Content-Type-Options at the
-     application layer in `next.config.ts`).
-4. Also enable: **SSL/TLS** → **Edge Certificates** → **Always Use HTTPS** (auto-redirects
-   http:// → https:// at the edge before HSTS can kick in for first-time visitors).
-5. Also confirm: **Minimum TLS Version** → **TLS 1.2** (1.0 and 1.1 are
-   deprecated since 2020 and have known weaknesses).
+**Scope note:** all settings below apply to the **coups.app** zone (the
+Vercel-served frontend). The game WebSocket connects directly to
+`coup-online-game-server.a-hitelare2.workers.dev` — Cloudflare's own
+shared workers.dev zone, not yours — so WAF/Bot rules on coups.app don't
+filter WS traffic. (That's fine: the Worker enforces its own Origin
+allowlist + rate limiting on every upgrade.)
 
-### 8b. Bot Fight Mode
-1. Cloudflare dashboard → **coups.app** → **Security** → **Bots**
-2. **Bot Fight Mode** → **On**
-3. (Free tier only has Bot Fight Mode, not Super Bot Fight Mode — that's
-   Pro+ and not in v1 scope.)
-4. Watch Sentry / your inbox for the first week — Bot Fight Mode occasionally
-   challenges legitimate users on weird networks (corporate VPNs, mobile
-   carriers with shared IP pools, Tor). If you see a wave of "blocked from
-   coups.app" reports, flip it off and revisit.
+### 8a. SSL/TLS → Overview
+- **SSL/TLS encryption mode**: **Full (strict)** — encrypts and validates
+  Cloudflare↔Vercel. Other modes either skip encryption ("Flexible" —
+  vulnerable to downgrade) or skip cert validation ("Full" — vulnerable to
+  MITM at origin). Vercel auto-provisions Let's Encrypt for coups.app so
+  strict will work.
 
-### 8c. WAF Managed Rules
-1. Cloudflare dashboard → **coups.app** → **Security** → **WAF** →
-   **Managed rules**
-2. Enable **Cloudflare Free Managed Ruleset** (the only one available on
-   Free; Pro adds OWASP Core + Cloudflare Specials).
-3. **Action**: **Managed Challenge** (presents a JS challenge to suspicious
-   requests; most users pass invisibly). Don't use "Block" outright — too
-   aggressive for a small site.
-4. **Sensitivity**: Medium (default). High will challenge too many
-   legitimate users.
+### 8b. SSL/TLS → Edge Certificates
+- **Always Use HTTPS**: **ON** (auto-redirect http://→https:// at edge)
+- **HTTP Strict Transport Security (HSTS)**: **Enable HSTS**
+  - **Max-Age**: 6 months (bump to 12 after a week of no issues — don't
+    start at 12, browsers cache the policy and you can't unstick them)
+  - **Apply HSTS policy to subdomains (includeSubDomains)**: ON
+  - **Preload**: OFF (one-way door — submission to the HSTS Preload list
+    takes months to remove; defer until you've been stable 6+ months)
+  - **No-Sniff Header**: OFF (we set X-Content-Type-Options at origin)
+- **Minimum TLS Version**: **TLS 1.2** (1.0/1.1 deprecated since 2020)
+- **Opportunistic Encryption**: **ON**
+- **TLS 1.3**: **ON**
+- **Automatic HTTPS Rewrites**: **ON** (rewrites accidental http:// links
+  in HTML/CSS to https://, prevents mixed-content blocks)
+- **Certificate Transparency Monitoring**: **ON** (alerts if anyone issues
+  a cert for coups.app — rogue-issuance signal)
 
-### 8d. Security Level (overall threat-blocking aggressiveness)
-1. **Security** → **Settings** → **Security Level**
-2. Leave at **Medium** (the default). High challenges too many normal
-   users; Low effectively turns off the feature.
+### 8c. Security → Settings
+- **Security Level**: **Medium** (default). High challenges too many legit
+  users; Low effectively disables.
+- **Challenge Passage**: 30 minutes (default fine)
+- **Browser Integrity Check**: **ON**. Blocks no-User-Agent + known-bad UA
+  strings. Zero false-positive risk for browsers.
+- **Privacy Pass Support**: **ON**. Lets Tor / Privacy Pass token holders
+  skip challenges they've already passed elsewhere.
+- **Replace insecure JavaScript libraries**: **ON** if shown (we don't ship
+  jQuery but no downside).
 
-### 8e. Rate Limiting at the edge (skip on Free)
-Free tier includes a small rate-limiting allowance (10K requests / day
-across all rules) which is too tight to be useful for a real game. Our
-Worker already does per-user + per-endpoint rate limiting via the
-`RateLimitRegistry` DO — that's more granular than what Cloudflare edge
-rules could provide anyway. **Skip** unless you upgrade to Workers Paid
-later.
+### 8d. Security → Bots
+- **Bot Fight Mode**: **ON**
+- Super Bot Fight Mode is Pro+; skip.
+- Watch Sentry / user reports for the first week — corporate VPNs and
+  shared mobile IPs occasionally get challenged. If a real user reports a
+  block, find their event in Security → Events and add a WAF allowlist
+  rule for their pattern.
 
-### 8f. Browser Integrity Check
-1. **Security** → **Settings** → **Browser Integrity Check** → **ON**
-2. Blocks requests with no User-Agent or known-bad UA strings. Zero false
-   positive risk for normal users; catches the dumbest scrapers / curl
-   probing.
+### 8e. Security → WAF
+- **Managed rules → Cloudflare Free Managed Ruleset**: **ON**
+  - Action: **Managed Challenge** (JS challenge; most users pass invisibly)
+  - Sensitivity: **Medium**
+- **Custom rules**: free tier allows 5. Optional adds:
+  - Block requests to `/api/*` with empty User-Agent
+  - Managed Challenge bursts on `/api/auth/sign-in/*` when
+    `cf.threat_score > 10`
+  These are belt-and-braces on top of our Worker-side rate limiting + Better
+  Auth's customRules. Skip if you'd rather keep slots free for future
+  tuning.
+- **Rate limiting rules**: **skip on Free** (10K req/day across all rules
+  is too tight; our Worker `RateLimitRegistry` DO is more granular anyway)
+
+### 8f. Security → Page Shield
+- **Page Shield**: **ON**
+- Free tier shows what scripts actually load on your pages —
+  complements the CSP in `next.config.ts` by giving observability into
+  what's running. Alerts/enforcement are Pro+; the visibility alone is
+  worth it.
+
+### 8g. Security → DDoS Protection
+- **HTTP DDoS Attack Protection**: **ON**, sensitivity defaults are fine
+- L3/L4 DDoS is auto-on at the network layer — no config
+- Tune sensitivity only if you see false positives in Security → Events
+
+### 8h. Scrape Shield
+- **Email Address Obfuscation**: **ON** (auto-obscures emails in HTML to
+  defeat scrapers; no user downside)
+- **Server-Side Excludes**: **OFF** (we have no content to selectively
+  hide from suspicious visitors)
+- **Hotlink Protection**: **OFF** (avatars are served from the Worker
+  domain, not coups.app — hotlinking isn't a vector we care about)
+
+### 8i. Network
+- **HTTP/3 (with QUIC)**: **ON** (faster + UDP-based, harder to throttle)
+- **0-RTT Connection Resumption**: **ON** (saves 1 round-trip for repeat
+  visitors)
+- **HTTP/2**: ON (default)
+- **IPv6 Compatibility**: ON (default)
+- **WebSockets**: **verify ON**. Doesn't affect game WS (that hits
+  workers.dev directly), but covers any future scenario where WS goes
+  through coups.app.
+- **gRPC**: OFF (unused)
+- **Onion Routing**: OFF initially (nice-to-have privacy gesture for Tor
+  users; add later if there's demand)
+- **Pseudo IPv4**: OFF (legacy compat, unneeded)
+
+### 8j. Analytics → Security Events (not a setting — monitoring habit)
+After enabling all of the above:
+- **Daily for the first week**: skim Security → Events. Look for legit-
+  looking IPs being challenged repeatedly (= real users being blocked).
+  For each: drill in, copy the `cf-ray`, add a WAF custom rule to soften
+  whichever managed rule tripped.
+- **Daily for the first week**: look for actual attack patterns (e.g.,
+  POST `/api/auth/sign-in/magic-link` flood from one ASN). The Worker-side
+  rate limit + Better Auth's customRules are already handling these, but
+  the edge view shows you what's being attempted.
+- **After week 1**: weekly checks are sufficient.
+
+### 8k. What to skip (paid or counterproductive)
+- **Authenticated Origin Pulls** — needs cert installed at Vercel; Vercel
+  doesn't expose this. mTLS to origin is Enterprise anyway.
+- **Super Bot Fight Mode**, **OWASP Core Ruleset**, **Cloudflare
+  Specials**, **Page Shield enforcement/alerts** — Pro+
+- **Cloudflare Access (Zero Trust)** — could gate `/admin` with another
+  auth layer, but Better Auth + the admin-email allowlist already do that.
+  Adding Cloudflare Access introduces a second sign-in flow for no
+  security gain.
+- **Spectrum** — Enterprise; non-HTTP only
+- **API Shield** — mostly paid; our Worker does Zod validation at the
+  boundary
+- **Cloudflare Logpush** — paid; Free Security Events page is enough at
+  our scale
+- **Rocket Loader** — async-loads JS; **don't enable**. Interferes with
+  Sentry, `next/script` strategies, and GSAP.
+- **Mirage** (image optimization) — Pro+; we already do client-side
+  resize before upload
 
 ### Verify all of the above
 After flipping these on, do one full sign-in + game session from an
-incognito window to confirm nothing's broken. Watch DevTools Network for any
-challenged requests; watch the Cloudflare **Security** → **Events** log for
-patterns. If a legitimate flow gets challenged repeatedly, dial back the
-specific rule that's tripping it.
+incognito window to confirm nothing's broken. Watch DevTools Network for
+any challenged requests. Common false-positive sources:
+- Bot Fight Mode challenging the magic-link sign-in endpoint → add a WAF
+  custom rule to skip Bot Fight on `/api/auth/sign-in/magic-link`
+- WAF managed rule blocking the OAuth callback → same pattern, skip on
+  `/api/auth/callback/*`
+- DDoS sensitivity too high → drop one notch in Security → Settings →
+  DDoS Protection
 
 ---
 
