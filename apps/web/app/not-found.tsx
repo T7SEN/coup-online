@@ -105,7 +105,7 @@ export default function NotFound() {
           data-nf="card"
           aria-hidden
           style={{ rotate: '-5deg', backgroundColor: 'oklch(0.31 0.008 70)' }}
-          className="relative flex aspect-[5/7] w-44 items-center justify-center overflow-hidden rounded-xl border-2 border-gold/55 shadow-xl sm:w-52"
+          className="relative flex aspect-5/7 w-44 items-center justify-center overflow-hidden rounded-xl border-2 border-gold/55 shadow-xl sm:w-52"
         >
           {/* Soft light wash behind the numeral — a faint spotlight. */}
           <div

@@ -4,6 +4,7 @@ import { useRef } from 'react'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 import type { Influence } from '@coup-online/protocol'
+import { CardBackArt } from '@/components/card-back-art'
 import {
   Dialog,
   DialogClose,
@@ -46,10 +47,15 @@ function CardFace({
   influence,
   sizeClassName,
   animateReveal = false,
+  cardBackSkin,
 }: {
   influence: Influence
   sizeClassName: string
   animateReveal?: boolean
+  // The patron-chosen back skin for the seat that OWNS this card. Null /
+  // undefined / unknown values fall back to the default parchment back via
+  // CardBackArt.
+  cardBackSkin?: string | null
 }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
@@ -124,15 +130,16 @@ function CardFace({
             <span className="pointer-events-none absolute top-1/2 left-1/2 h-px w-[200%] -translate-x-1/2 -translate-y-1/2 -rotate-[55deg] bg-white/90" />
           )}
         </div>
-        {/* Back — always back.svg. */}
+        {/* Back — patron-chosen skin if any, default parchment otherwise. */}
         <div
-          className="absolute inset-0 overflow-hidden rounded-xl bg-cover bg-center shadow-sm ring-1 ring-foreground/10"
+          className="absolute inset-0 overflow-hidden rounded-xl shadow-sm ring-1 ring-foreground/10"
           style={{
             backfaceVisibility: 'hidden',
             transform: 'rotateY(180deg)',
-            backgroundImage: 'url(/cards/back.svg)',
           }}
-        />
+        >
+          <CardBackArt skin={cardBackSkin} />
+        </div>
       </div>
     </div>
   )
@@ -149,10 +156,14 @@ export function InfluenceCard({
   influence,
   size = 'sm',
   className,
+  cardBackSkin,
 }: {
   influence: Influence
   size?: Size
   className?: string
+  // Patron skin chosen by the card's owner; threaded through from
+  // `PlayerSeat.cardBackSkin`. Undefined / null = the default back.
+  cardBackSkin?: string | null
 }) {
   const label = cardLabel(influence)
   return (
@@ -165,7 +176,12 @@ export function InfluenceCard({
           className,
         )}
       >
-        <CardFace influence={influence} sizeClassName={SIZE_CLASS[size]} animateReveal />
+        <CardFace
+          influence={influence}
+          sizeClassName={SIZE_CLASS[size]}
+          animateReveal
+          cardBackSkin={cardBackSkin}
+        />
       </DialogTrigger>
       <DialogContent
         showCloseButton={false}
@@ -177,7 +193,11 @@ export function InfluenceCard({
           aria-label="Close enlarged card"
           className="cursor-pointer rounded-2xl outline-none"
         >
-          <CardFace influence={influence} sizeClassName="aspect-[2/3] w-64 max-w-[80vw]" />
+          <CardFace
+            influence={influence}
+            sizeClassName="aspect-[2/3] w-64 max-w-[80vw]"
+            cardBackSkin={cardBackSkin}
+          />
         </DialogClose>
       </DialogContent>
     </Dialog>

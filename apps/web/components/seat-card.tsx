@@ -4,6 +4,7 @@ import { useRef } from 'react'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 import type { PlayerSeat } from '@coup-online/protocol'
+import { GildedName } from '@/components/gilded-name'
 import {
   burstParticles,
   CoinCount,
@@ -11,6 +12,7 @@ import {
   MOTION_ENABLED,
   NO_REDUCED_MOTION,
 } from '@/components/motion'
+import { PatronBadge } from '@/components/patron-badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -82,9 +84,17 @@ export function SeatCard({
                 {seat.displayName.charAt(0).toUpperCase()}
               </AvatarFallback>
             </Avatar>
-            <span dir="auto" className="truncate font-medium">
-              {seat.displayName}
-            </span>
+            <GildedName
+              name={seat.displayName}
+              gilded={seat.gildedNickname ?? false}
+              dir="auto"
+              className="truncate font-medium"
+            />
+            <PatronBadge
+              isPatron={seat.isPatron ?? false}
+              founderRank={seat.founderRank ?? null}
+              size="xs"
+            />
             {seat.isMe && (
               <span className="shrink-0 text-xs text-muted-foreground">(you)</span>
             )}
@@ -99,7 +109,11 @@ export function SeatCard({
         </div>
         <div className="flex items-center gap-2">
           {seat.influence.map((inf, i) => (
-            <InfluenceCard key={i} influence={inf} />
+            <InfluenceCard
+              key={i}
+              influence={inf}
+              cardBackSkin={seat.cardBackSkin}
+            />
           ))}
         </div>
         {showBadges && (

@@ -11,3 +11,25 @@ allowBuilds:
   # withSentryConfig at build time. Legitimate; needed once a Sentry auth
   # token is configured. See references/deployment.md.
   '@sentry/cli': true
+
+# Transitive-dependency overrides. pnpm 10+ reads overrides from this file,
+# not from package.json's `pnpm.overrides` (that location is silently
+# ignored). Each entry forces every install of the named package to satisfy
+# the given semver range — used here to pull patched versions of deps that
+# `pnpm audit` flags as vulnerable.
+#
+#   esbuild  — moderate, dev-server CSRF (drizzle-kit transitively pulls
+#              the old 0.18.20). >=0.24.3 leaves vite/tsx's 0.27+ alone.
+#   postcss  — moderate, XSS via stringify (next.js transitively pulls
+#              8.4.31). >=8.5.10 stays within 8.x.
+#   ws       — moderate, uninitialised memory disclosure (miniflare pulls
+#              the old 8.18.0). >=8.20.1 stays within 8.x.
+#
+# `mathjs` (high × 2 in ts-trueskill) is intentionally NOT pinned: the
+# vulnerability requires user-controlled strings into mathjs's expression
+# parser, which ts-trueskill never does — and forcing mathjs >=15 would
+# break ts-trueskill's 13.x API expectations.
+overrides:
+  esbuild: ">=0.24.3"
+  postcss: ">=8.5.10"
+  ws: ">=8.20.1"

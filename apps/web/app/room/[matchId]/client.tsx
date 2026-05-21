@@ -35,8 +35,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { GildedName } from '@/components/gilded-name'
+import { PatronBadge } from '@/components/patron-badge'
 import { GAME_SERVER_WS } from '@/lib/config'
 import { logger } from '@/lib/logger'
+import { tableThemeStyle } from '@/lib/table-theme'
 import { useIsClient } from '@/lib/use-is-client'
 import { ordinal } from '@/lib/utils'
 import { WsClient, type ConnectionState } from '@/lib/ws-client'
@@ -493,9 +496,15 @@ function GamePanel({
         </Alert>
       )}
 
-      {/* The table — opponents up top, the court in the middle, your hand below. */}
+      {/* The table — opponents up top, the court in the middle, your hand
+          below. The host's patron tableTheme (broadcast in view.tableTheme)
+          is applied as CSS-variable overrides on this wrapper; descendants
+          read `--color-table`, `--color-table-foreground`, and the custom
+          `--table-vignette` token. When the theme is null / 'standard', no
+          inline style is set and the globals.css :root defaults paint. */}
       <div
         ref={tableRef}
+        style={tableThemeStyle(view.tableTheme)}
         className="relative overflow-hidden rounded-2xl border border-gold/20 bg-table p-4 text-table-foreground shadow-[inset_0_3px_30px_rgba(0,0,0,0.42)] sm:p-6"
       >
         <div
@@ -503,7 +512,7 @@ function GamePanel({
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              'radial-gradient(ellipse 70% 55% at 50% 40%, oklch(0.44 0.05 152 / 0.5), transparent 78%)',
+              'radial-gradient(ellipse 70% 55% at 50% 40%, var(--table-vignette, oklch(0.44 0.05 152 / 0.5)), transparent 78%)',
           }}
         />
         <div ref={contentRef} className="relative flex flex-col gap-5">
@@ -1040,7 +1049,11 @@ function OverPanel({ winnerPlayerId, view }: { winnerPlayerId: string; view: Pla
   ]
 
   // Game-over flourish — the winner heading springs in with a gold burst and
-  // the standings stagger up. references/animations.md.
+  // the standings stagger up. When the winner is a patron with the
+  // victoryFlourish privilege enabled, a second, larger burst fires a
+  // moment later — the "flourish across the table" the privilege promises
+  // on /support. references/animations.md.
+  const patronFlourish = winner?.victoryFlourish === true
   const rootRef = useRef<HTMLDivElement>(null)
   useGSAP(
     () => {
@@ -1064,10 +1077,23 @@ function OverPanel({ winnerPlayerId, view }: { winnerPlayerId: string; view: Pla
           '-=0.2',
         )
         burstParticles(el, { tone: 'gold', count: 24, spread: 140 })
+        if (patronFlourish) {
+          // Patron's bonus flourish — a wider, denser shower delayed past
+          // the first burst so the two waves are distinct on the eye.
+          window.setTimeout(() => {
+            if (rootRef.current) {
+              burstParticles(rootRef.current, {
+                tone: 'gold',
+                count: 56,
+                spread: 240,
+              })
+            }
+          }, 480)
+        }
       })
       return () => mm.revert()
     },
-    { scope: rootRef },
+    { scope: rootRef, dependencies: [patronFlourish] },
   )
 
   return (
@@ -1081,8 +1107,26 @@ function OverPanel({ winnerPlayerId, view }: { winnerPlayerId: string; view: Pla
             <span className="text-xs tracking-[0.3em] text-muted-foreground uppercase">
               Game over
             </span>
-            <h2 className="font-display text-2xl tracking-wide">
-              {winner?.isMe ? 'You won!' : `${winner?.displayName ?? '?'} won`}
+            <h2 className="flex flex-wrap items-center justify-center gap-2 font-display text-2xl tracking-wide">
+              {winner?.isMe ? (
+                <span>You won!</span>
+              ) : winner ? (
+                <>
+                  <GildedName
+                    name={winner.displayName}
+                    gilded={winner.gildedNickname ?? false}
+                    dir="auto"
+                  />
+                  <PatronBadge
+                    isPatron={winner.isPatron ?? false}
+                    founderRank={winner.founderRank ?? null}
+                    size="sm"
+                  />
+                  <span>won</span>
+                </>
+              ) : (
+                <span>? won</span>
+              )}
             </h2>
           </div>
 
@@ -1105,9 +1149,17 @@ function OverPanel({ winnerPlayerId, view }: { winnerPlayerId: string; view: Pla
                     <span className="w-5 shrink-0 text-center font-display tabular-nums">
                       {i + 1}
                     </span>
-                    <span dir="auto" className="truncate font-medium">
-                      {s.displayName}
-                    </span>
+                    <GildedName
+                      name={s.displayName}
+                      gilded={s.gildedNickname ?? false}
+                      dir="auto"
+                      className="truncate font-medium"
+                    />
+                    <PatronBadge
+                      isPatron={s.isPatron ?? false}
+                      founderRank={s.founderRank ?? null}
+                      size="xs"
+                    />
                     {s.isMe && (
                       <span className="shrink-0 text-xs text-muted-foreground">(you)</span>
                     )}

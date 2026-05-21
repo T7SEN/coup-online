@@ -152,6 +152,31 @@ const ALG = 'HS256'
 export interface JwtClaims {
   readonly userId: string
   readonly displayName: string
+  // Patron cosmetics — present only if the user was a patron at token-issue
+  // time. Absent / undefined for non-patrons (most claims). See ws-token.ts
+  // for the issuance side.
+  readonly isPatron?: boolean
+  readonly founderRank?: number | null
+  readonly gildedNickname?: boolean
+  readonly cardBackSkin?: string | null
+  readonly tableTheme?: string | null
+  readonly victoryFlourish?: boolean
+}
+
+// Narrow `unknown` JWT payload values to optional patron fields. The token
+// is signed by us so the shape is trusted, but TypeScript still needs the
+// guards — and the guards keep us honest if a future deploy lands with a
+// stale token in flight.
+function asOptBool(v: unknown): boolean | undefined {
+  return typeof v === 'boolean' ? v : undefined
+}
+function asOptNullableNumber(v: unknown): number | null | undefined {
+  if (v === null) return null
+  return typeof v === 'number' ? v : undefined
+}
+function asOptNullableString(v: unknown): string | null | undefined {
+  if (v === null) return null
+  return typeof v === 'string' ? v : undefined
 }
 
 export async function verifyJwt(secret: string, token: string): Promise<JwtClaims | null> {
@@ -161,7 +186,16 @@ export async function verifyJwt(secret: string, token: string): Promise<JwtClaim
     if (typeof payload.userId !== 'string' || typeof payload.displayName !== 'string') {
       return null
     }
-    return { userId: payload.userId, displayName: payload.displayName }
+    return {
+      userId: payload.userId,
+      displayName: payload.displayName,
+      isPatron: asOptBool(payload.isPatron),
+      founderRank: asOptNullableNumber(payload.founderRank),
+      gildedNickname: asOptBool(payload.gildedNickname),
+      cardBackSkin: asOptNullableString(payload.cardBackSkin),
+      tableTheme: asOptNullableString(payload.tableTheme),
+      victoryFlourish: asOptBool(payload.victoryFlourish),
+    }
   } catch {
     return null
   }

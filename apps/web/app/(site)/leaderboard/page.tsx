@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Crown } from 'lucide-react'
+import { GildedName } from '@/components/gilded-name'
+import { PatronBadge } from '@/components/patron-badge'
 import { OrnamentDivider } from '@/components/site/ornament-divider'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -22,6 +24,9 @@ interface LeaderboardPlayer {
   userId: string
   displayName: string
   image: string | null
+  isPatron: boolean
+  founderRank: number | null
+  patronGildedNickname: boolean
   rating: number
   played: number
   wins: number
@@ -80,11 +85,18 @@ function ChampionCard({ player }: { player: LeaderboardPlayer }) {
         <p className="text-xs font-medium tracking-[0.2em] text-gold/80 uppercase">
           Champion
         </p>
-        <h2
-          dir="auto"
-          className="truncate font-display text-xl tracking-wide"
-        >
-          {player.displayName}
+        <h2 className="flex items-center gap-2 truncate font-display text-xl tracking-wide">
+          <GildedName
+            name={player.displayName}
+            gilded={player.patronGildedNickname}
+            dir="auto"
+            className="truncate"
+          />
+          <PatronBadge
+            isPatron={player.isPatron}
+            founderRank={player.founderRank}
+            size="sm"
+          />
         </h2>
         <p className="text-sm text-muted-foreground">
           {recordLabel(player)} · {winRatePct(player)}% wins
@@ -119,11 +131,18 @@ function RunnerUp({ player }: { player: LeaderboardPlayer }) {
         <AvatarImage src={player.image ?? undefined} alt="" />
         <Initial name={player.displayName} />
       </Avatar>
-      <h3
-        dir="auto"
-        className="w-full truncate font-display tracking-wide"
-      >
-        {player.displayName}
+      <h3 className="flex w-full items-center justify-center gap-1.5 truncate font-display tracking-wide">
+        <GildedName
+          name={player.displayName}
+          gilded={player.patronGildedNickname}
+          dir="auto"
+          className="truncate"
+        />
+        <PatronBadge
+          isPatron={player.isPatron}
+          founderRank={player.founderRank}
+          size="xs"
+        />
       </h3>
       <p className="font-display text-xl tabular-nums text-primary">
         {player.rating}
@@ -154,8 +173,18 @@ function RankRow({ player }: { player: LeaderboardPlayer }) {
           <Initial name={player.displayName} />
         </Avatar>
         <div className="min-w-0 flex-1">
-          <p dir="auto" className="truncate font-medium">
-            {player.displayName}
+          <p className="flex items-center gap-1.5 truncate font-medium">
+            <GildedName
+              name={player.displayName}
+              gilded={player.patronGildedNickname}
+              dir="auto"
+              className="truncate"
+            />
+            <PatronBadge
+              isPatron={player.isPatron}
+              founderRank={player.founderRank}
+              size="xs"
+            />
           </p>
           <p className="text-xs text-muted-foreground">
             {recordLabel(player)} · {winRatePct(player)}%

@@ -25,6 +25,7 @@ import {
   updateUserDisplayName,
   updateUserImage,
   updateUserProfileColor,
+  updateUserProfileImage,
   type PatronSettingsPatch,
 } from '@coup-online/db'
 import { isAdminEmail, validateDisplayName } from '@coup-online/protocol'
@@ -32,6 +33,7 @@ import { conservativeRating } from '@coup-online/rating'
 import { createAuth } from './auth'
 import { GameRoom as GameRoomClass } from './do-game-room'
 import { MatchmakingQueue as MatchmakingQueueClass } from './do-matchmaking'
+import { RateLimitRegistry as RateLimitRegistryClass } from './do-rate-limit'
 import { RoomCodeRegistry as RoomCodeRegistryClass } from './do-room-codes'
 import { logger } from './logger'
 import { isOriginAllowed } from './origin'
@@ -43,6 +45,215 @@ const app = new Hono<{ Bindings: Env }>()
 // upload, so the real payload is a few KB — this cap only rejects abuse.
 // (Nickname rules live in packages/protocol's `validateDisplayName`.)
 const AVATAR_MAX_BYTES = 1_048_576
+
+// Patron-banner upload cap. The banner is resized to 1200×240 WebP client-
+// side (see PatronageCard's onPickBanner), which typically lands at 30–120 KB.
+// 2 MB allows for high-detail backgrounds without inviting abuse. Banners
+// share the AVATARS R2 bucket under a `banners/` key prefix.
+const BANNER_MAX_BYTES = 2_097_152
+
+// Image-upload security. Both /api/me/avatar and /api/me/banner accept user-
+// supplied bytes; serving them back as a same-origin URL means they MUST NOT
+// be a vector for script execution. Defense-in-depth:
+//   1. Strict Content-Type allowlist — no SVG (can host <script>), no GIF
+//      (polyglot risk; also our clients always send WebP).
+//   2. Magic-byte sniff — the client's Content-Type header is advisory; we
+//      verify the body actually starts with the right format-id bytes.
+//   3. Store + serve with the SERVER-determined content type, not the
+//      client's claim.
+//   4. Serve with `X-Content-Type-Options: nosniff` so legacy browsers
+//      can't override the type by content-sniffing the body.
+const ALLOWED_IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+])
+
+type AllowedImageType = 'image/png' | 'image/jpeg' | 'image/webp'
+
+// HTTP rate limiting — applied to sensitive endpoints (uploads, in-band
+// patches, account-destructive actions, admin writes). State lives in the
+// RateLimitRegistry DO; see src/do-rate-limit.ts. Keys are scoped
+// `${userId}:${endpoint-name}` so different endpoints have independent
+// budgets per user.
+//
+// All limits go through `checkRateLimit` so we have one place to tune; on
+// rate-limit-hit we return a 429 with both a JSON body and a Retry-After
+// header (in seconds, per RFC 7231).
+async function checkRateLimit(
+  env: Env,
+  userId: string,
+  endpoint: string,
+  limit: number,
+  windowMs: number,
+): Promise<{ ok: true } | { ok: false; retryAfterMs: number }> {
+  // Single global instance — see do-rate-limit.ts for rationale.
+  const stub = env.RATE_LIMIT.get(env.RATE_LIMIT.idFromName('global'))
+  return await stub.check(`${userId}:${endpoint}`, limit, windowMs)
+}
+
+// Build a 429 response with the standard headers. Retry-After is in whole
+// seconds (rounded up), which is the HTTP convention.
+function rateLimitResponse(
+  c: Context<{ Bindings: Env }>,
+  retryAfterMs: number,
+) {
+  return c.json(
+    { error: 'rate_limited', retryAfterMs },
+    429,
+    {
+      'Retry-After': String(Math.max(1, Math.ceil(retryAfterMs / 1000))),
+    },
+  )
+}
+
+// Image dimension caps — decompression-bomb defence. A ~50 KB PNG can
+// decode to a 100,000 × 100,000 image; ours never need anything close. The
+// Worker stores raw bytes either way, but any client that decodes them
+// would OOM. We reject before storage so a malicious image never reaches
+// R2 in the first place.
+//
+// 5000 × 5000 = 25 megapixels comfortably fits everything our clients
+// actually send (avatar 256×256, banner 1200×240) with room for hand-made
+// uploads. Tighter than the byte cap, so a tall-thin polyglot stays caught.
+const MAX_IMAGE_DIMENSION = 5000
+const MAX_IMAGE_PIXELS = 25_000_000
+
+// Read width × height from a PNG / JPEG / WebP header. Returns null if the
+// header is malformed or if it's a WebP sub-format we don't recognise
+// (then the caller rejects — fail safe). The byte ranges below come from
+// the three format specs and have been gritty-tested against canvas-
+// generated WebPs.
+function parseImageDimensions(
+  bytes: Uint8Array,
+  type: AllowedImageType,
+): { width: number; height: number } | null {
+  if (type === 'image/png') {
+    // PNG: 8-byte signature + 4-byte IHDR length + 4-byte 'IHDR' tag,
+    // then big-endian uint32 width + height at offsets 16-23.
+    if (bytes.length < 24) return null
+    const width =
+      ((bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19]) >>>
+      0
+    const height =
+      ((bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23]) >>>
+      0
+    return { width, height }
+  }
+  if (type === 'image/jpeg') {
+    // JPEG: walk markers from offset 2 (after SOI = FF D8) until an SOFn.
+    // SOFn = FF C0..CF except C4 (DHT), C8 (JPG), CC (DAC). After the
+    // marker: 2-byte length, 1-byte precision, 2-byte height, 2-byte
+    // width (all big-endian).
+    let pos = 2
+    while (pos + 9 < bytes.length) {
+      if (bytes[pos] !== 0xff) return null
+      const marker = bytes[pos + 1]
+      const isSofMarker =
+        marker >= 0xc0 &&
+        marker <= 0xcf &&
+        marker !== 0xc4 &&
+        marker !== 0xc8 &&
+        marker !== 0xcc
+      if (isSofMarker) {
+        const height = (bytes[pos + 5] << 8) | bytes[pos + 6]
+        const width = (bytes[pos + 7] << 8) | bytes[pos + 8]
+        return { width, height }
+      }
+      // Restart markers (FF D0..D7) carry no payload — skip 2 bytes.
+      if (marker >= 0xd0 && marker <= 0xd7) {
+        pos += 2
+        continue
+      }
+      // Every other segment has a 2-byte big-endian length immediately
+      // after the marker.
+      const segLen = (bytes[pos + 2] << 8) | bytes[pos + 3]
+      if (segLen < 2) return null
+      pos += 2 + segLen
+    }
+    return null
+  }
+  if (type === 'image/webp') {
+    if (bytes.length < 30) return null
+    // Chunk type at bytes 12-15.
+    const t0 = bytes[12]
+    const t1 = bytes[13]
+    const t2 = bytes[14]
+    const t3 = bytes[15]
+    // 'VP8 ' = lossy. Width/height at 26-27 / 28-29 LE, lower 14 bits each.
+    if (t0 === 0x56 && t1 === 0x50 && t2 === 0x38 && t3 === 0x20) {
+      const width = (bytes[26] | (bytes[27] << 8)) & 0x3fff
+      const height = (bytes[28] | (bytes[29] << 8)) & 0x3fff
+      return { width, height }
+    }
+    // 'VP8L' = lossless. After byte 20 (signature 0x2F), 4 bytes packed LE:
+    // bits 0-13 = width-1, bits 14-27 = height-1.
+    if (t0 === 0x56 && t1 === 0x50 && t2 === 0x38 && t3 === 0x4c) {
+      const packed =
+        bytes[21] |
+        (bytes[22] << 8) |
+        (bytes[23] << 16) |
+        (bytes[24] << 24)
+      const width = (packed & 0x3fff) + 1
+      const height = ((packed >>> 14) & 0x3fff) + 1
+      return { width, height }
+    }
+    // 'VP8X' = extended (with alpha/ICC/etc). Canvas width-1 at 24-26 LE u24,
+    // canvas height-1 at 27-29 LE u24.
+    if (t0 === 0x56 && t1 === 0x50 && t2 === 0x38 && t3 === 0x58) {
+      const width =
+        (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16)) + 1
+      const height =
+        (bytes[27] | (bytes[28] << 8) | (bytes[29] << 16)) + 1
+      return { width, height }
+    }
+    return null
+  }
+  return null
+}
+
+// Format identifier read off the first few bytes of an upload body. Returns
+// null for anything we don't trust (SVG, GIF, BMP, plain bytes, polyglots).
+function sniffImageType(bytes: Uint8Array): AllowedImageType | null {
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return 'image/png'
+  }
+  // JPEG: FF D8 FF — every JPEG starts with the SOI marker.
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
+    return 'image/jpeg'
+  }
+  // WebP: "RIFF" <4-byte size> "WEBP"
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && // R
+    bytes[1] === 0x49 && // I
+    bytes[2] === 0x46 && // F
+    bytes[3] === 0x46 && // F
+    bytes[8] === 0x57 && // W
+    bytes[9] === 0x45 && // E
+    bytes[10] === 0x42 && // B
+    bytes[11] === 0x50 // P
+  ) {
+    return 'image/webp'
+  }
+  return null
+}
 
 // Profile crest banner colors — the fixed preset palette a player can pick.
 // Must stay in sync with PROFILE_COLORS in apps/web/lib/profile-colors.ts
@@ -103,16 +314,45 @@ app.post('/api/ws-token', async (c) => {
   if (!session?.user?.id) {
     return c.json({ error: 'unauthorized' }, 401)
   }
+  // 30 tokens per minute per user. Each WS connection consumes one; even
+  // on a flaky network with auto-reconnect, 30/min is more than legitimate
+  // traffic. Prevents a client (or hijacked session) from minting tokens
+  // in a loop to keep DOs warm or spam the upgrade endpoint.
+  const rate = await checkRateLimit(
+    c.env,
+    session.user.id,
+    'ws-token',
+    30,
+    60_000,
+  )
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  // Pull the user's full row so we can embed patron cosmetics in the JWT.
+  // The DO uses those at seat-creation time and never has to query D1 itself,
+  // keeping the per-connection hot path off D1. SKILL.md § 5 — D1 lives on
+  // the Worker, not the DO.
+  const db = createDb(c.env.DB)
+  const me = await getUserById(db, session.user.id)
+  if (!me) {
+    return c.json({ error: 'user_not_found' }, 404)
+  }
   // `||` (not `??`) — Better Auth may persist `name` as an empty string for
   // magic-link signups. Empty-string would propagate into the JWT and show as
-  // a blank seat name in-game. trim() catches whitespace-only.
+  // a blank seat name in-game. trim() catches whitespace-only. The DB
+  // `displayName` (project nickname) wins over the provider `name` when set.
   const displayName =
+    me.displayName?.trim() ||
     session.user.name?.trim() ||
     session.user.email?.split('@')[0]?.trim() ||
     'Player'
   const token = await signWsToken(c.env.WS_SIGNING_SECRET, {
     userId: session.user.id,
     displayName,
+    isPatron: me.isPatron,
+    founderRank: me.founderRank,
+    gildedNickname: me.patronGildedNickname,
+    cardBackSkin: me.patronCardBack,
+    tableTheme: me.patronTableTheme,
+    victoryFlourish: me.patronVictoryFlourish,
   })
   return c.json({ token })
 })
@@ -181,12 +421,75 @@ const TABLE_THEMES = new Set([
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,22}[a-z0-9])?$/
 const VANITY_CODE_RE = /^[A-Z0-9]{4,10}$/
 
+// Slugs a patron is NOT allowed to claim. These either collide with site
+// routes (so `coups.app/u/admin` would look like it goes somewhere
+// official), are project-team handles, or are generic terms an attacker
+// could use to impersonate (`support`, `staff`). The list is intentionally
+// short — the right time to extend is when a specific impersonation
+// pattern actually shows up.
+// Validate that a path parameter is a `crypto.randomUUID()`-shaped UUID
+// before it touches D1 / R2. Belt-and-braces: Drizzle parameterises every
+// query (no SQL-injection path) and R2 keys are server-built, so this is
+// defence in depth — but it also protects against accidental misuse from
+// future code that might forward path params to log lines or build keys
+// without validation.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function isUuid(s: string): boolean {
+  return UUID_RE.test(s)
+}
+
+const RESERVED_SLUGS = new Set([
+  // Site route names (some prefixed by /u/, but visually misleading).
+  'admin',
+  'api',
+  'app',
+  'auth',
+  'about',
+  'changelog',
+  'leaderboard',
+  'maintenance',
+  'match',
+  'patrons',
+  'play',
+  'privacy',
+  'profile',
+  'room',
+  'rules',
+  'settings',
+  'support',
+  'terms',
+  'u',
+  // Project / brand reservations.
+  't7sen',
+  'coups',
+  'coup',
+  // Impersonation-risk terms.
+  'staff',
+  'team',
+  'mod',
+  'mods',
+  'moderator',
+  'help',
+  // Common reserved literals.
+  'null',
+  'undefined',
+  'true',
+  'false',
+])
+
 app.patch('/api/me/patron', async (c) => {
   const auth = createAuth(c.env)
   const session = await auth.api.getSession({ headers: c.req.raw.headers })
   if (!session?.user?.id) return c.json({ error: 'unauthorized' }, 401)
 
   const userId = session.user.id
+  // 30 patches per minute. Generous because the Settings form posts the
+  // full sparse-PATCH on every Save click; still tight enough to make
+  // slug-squatting via rapid retries unworkable (the unique index plus this
+  // limit make it ~2 seconds per attempt before retry-after triggers).
+  const rate = await checkRateLimit(c.env, userId, 'patron-patch', 30, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
   const db = createDb(c.env.DB)
   const me = await getUserById(db, userId)
   if (!me) return c.json({ error: 'user_not_found' }, 404)
@@ -219,8 +522,9 @@ app.patch('/api/me/patron', async (c) => {
     }
   }
 
-  // Slug: 3–24 chars, [a-z0-9-], must be unique. Reject if already taken by
-  // another user. Null clears.
+  // Slug: 3–24 chars, [a-z0-9-], must be unique, must not collide with a
+  // reserved name (site routes, brand, impersonation-risk terms). Null
+  // clears.
   if ('slug' in patch) {
     const v = patch.slug
     if (v === null) {
@@ -229,6 +533,9 @@ app.patch('/api/me/patron', async (c) => {
       const s = v.trim().toLowerCase()
       if (!SLUG_RE.test(s)) {
         return c.json({ error: 'invalid_slug' }, 400)
+      }
+      if (RESERVED_SLUGS.has(s)) {
+        return c.json({ error: 'slug_reserved' }, 400)
       }
       // Only re-check uniqueness if the slug is changing from the current one.
       if (s !== me.patronSlug) {
@@ -384,6 +691,8 @@ app.get('/api/players/search', async (c) => {
 // only (SKILL.md § 3.6); only the requester's own /api/me/profile includes it.
 app.get('/api/profile/:userId', async (c) => {
   const userId = c.req.param('userId')
+  // Reject anything that isn't a UUID before it reaches the DB.
+  if (!isUuid(userId)) return c.json({ error: 'user_not_found' }, 404)
   const db = createDb(c.env.DB)
   const [me, ratingHistory, stats] = await Promise.all([
     getUserById(db, userId),
@@ -599,6 +908,15 @@ app.patch('/api/me/profile', async (c) => {
   if (!session?.user?.id) {
     return c.json({ error: 'unauthorized' }, 401)
   }
+  // 30 PATCHes per minute for nickname + profileColor edits.
+  const rate = await checkRateLimit(
+    c.env,
+    session.user.id,
+    'profile-patch',
+    30,
+    60_000,
+  )
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
   let body: unknown
   try {
     body = await c.req.json()
@@ -655,22 +973,149 @@ app.post('/api/me/avatar', async (c) => {
   if (!session?.user?.id) {
     return c.json({ error: 'unauthorized' }, 401)
   }
-  const contentType = c.req.header('content-type') ?? ''
-  if (!contentType.startsWith('image/')) {
+  // 5 avatar uploads per minute. Catches accidental rapid resubmits and
+  // makes "fill R2 with churn" abuse pointless.
+  const rate = await checkRateLimit(c.env, session.user.id, 'avatar', 5, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  // Header allowlist — the client's claim. Real verification follows.
+  const claimedType = c.req.header('content-type') ?? ''
+  if (!ALLOWED_IMAGE_TYPES.has(claimedType)) {
     return c.json({ error: 'unsupported_type' }, 415)
   }
   const body = await c.req.arrayBuffer()
   if (body.byteLength === 0 || body.byteLength > AVATAR_MAX_BYTES) {
     return c.json({ error: 'invalid_size' }, 413)
   }
+  // Magic-byte verify the body actually IS what the client claimed. The
+  // stored content-type comes from the sniff, not the client header — so a
+  // smuggled SVG with `Content-Type: image/png` is impossible.
+  const fullBytes = new Uint8Array(body)
+  const sniffed = sniffImageType(fullBytes)
+  if (sniffed == null || sniffed !== claimedType) {
+    return c.json({ error: 'content_mismatch' }, 415)
+  }
+  // Decompression-bomb cap — reject before the bytes touch R2.
+  const dims = parseImageDimensions(fullBytes, sniffed)
+  if (
+    !dims ||
+    dims.width <= 0 ||
+    dims.height <= 0 ||
+    dims.width > MAX_IMAGE_DIMENSION ||
+    dims.height > MAX_IMAGE_DIMENSION ||
+    dims.width * dims.height > MAX_IMAGE_PIXELS
+  ) {
+    return c.json({ error: 'invalid_dimensions' }, 413)
+  }
   const userId = session.user.id
   await c.env.AVATARS.put(`avatars/${userId}`, body, {
-    httpMetadata: { contentType },
+    httpMetadata: { contentType: sniffed },
   })
   const image = `${new URL(c.req.url).origin}/api/avatars/${userId}?v=${Date.now()}`
   const db = createDb(c.env.DB)
   await updateUserImage(db, userId, image)
   return c.json({ image })
+})
+
+// Patron banner upload. Patron-only (403 for non-patrons). The request body
+// is raw image bytes; the client resizes to 1200×240 WebP first so payloads
+// are typically well under 100 KB. Stored in R2 at `banners/<userId>` in the
+// shared AVATARS bucket. `user.profileImage` is set to a versioned Worker
+// URL so a re-upload busts the browser cache. References this perk as
+// privilege #1 on /support ("Custom profile banner").
+app.post('/api/me/banner', async (c) => {
+  const auth = createAuth(c.env)
+  const session = await auth.api.getSession({ headers: c.req.raw.headers })
+  if (!session?.user?.id) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+  const userId = session.user.id
+  // 5 banner uploads per minute. Same reasoning as the avatar limit; patron
+  // gate doesn't replace abuse-budget protection.
+  const rate = await checkRateLimit(c.env, userId, 'banner', 5, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  const db = createDb(c.env.DB)
+  const me = await getUserById(db, userId)
+  if (!me) return c.json({ error: 'user_not_found' }, 404)
+  if (!me.isPatron) return c.json({ error: 'not_a_patron' }, 403)
+
+  // Same allowlist + magic-byte verify as the avatar endpoint. SVGs (which
+  // can carry inline <script>) are excluded by the allowlist; a body that
+  // doesn't pass the magic-byte sniff is rejected.
+  const claimedType = c.req.header('content-type') ?? ''
+  if (!ALLOWED_IMAGE_TYPES.has(claimedType)) {
+    return c.json({ error: 'unsupported_type' }, 415)
+  }
+  const body = await c.req.arrayBuffer()
+  if (body.byteLength === 0 || body.byteLength > BANNER_MAX_BYTES) {
+    return c.json({ error: 'invalid_size' }, 413)
+  }
+  const fullBytes = new Uint8Array(body)
+  const sniffed = sniffImageType(fullBytes)
+  if (sniffed == null || sniffed !== claimedType) {
+    return c.json({ error: 'content_mismatch' }, 415)
+  }
+  const dims = parseImageDimensions(fullBytes, sniffed)
+  if (
+    !dims ||
+    dims.width <= 0 ||
+    dims.height <= 0 ||
+    dims.width > MAX_IMAGE_DIMENSION ||
+    dims.height > MAX_IMAGE_DIMENSION ||
+    dims.width * dims.height > MAX_IMAGE_PIXELS
+  ) {
+    return c.json({ error: 'invalid_dimensions' }, 413)
+  }
+  await c.env.AVATARS.put(`banners/${userId}`, body, {
+    httpMetadata: { contentType: sniffed },
+  })
+  const profileImage = `${new URL(c.req.url).origin}/api/banners/${userId}?v=${Date.now()}`
+  await updateUserProfileImage(db, userId, profileImage)
+  return c.json({ profileImage })
+})
+
+// Clear the patron banner. Patron-only. Deletes the R2 object (idempotent —
+// R2 delete is a no-op if the key doesn't exist) and nulls the DB pointer
+// so the profile crest falls back to the preset profileColor backdrop.
+app.delete('/api/me/banner', async (c) => {
+  const auth = createAuth(c.env)
+  const session = await auth.api.getSession({ headers: c.req.raw.headers })
+  if (!session?.user?.id) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+  const userId = session.user.id
+  // 10 clears per minute — wider than the upload limit since clearing is
+  // cheap (R2 delete + DB null) but we still don't want a tight loop.
+  const rate = await checkRateLimit(c.env, userId, 'banner-delete', 10, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  const db = createDb(c.env.DB)
+  const me = await getUserById(db, userId)
+  if (!me) return c.json({ error: 'user_not_found' }, 404)
+  // We allow the DELETE even for revoked-but-historical patrons so a stuck
+  // banner can always be cleared by its owner; only the POST (upload) is
+  // strictly gated on isPatron.
+  await c.env.AVATARS.delete(`banners/${userId}`)
+  await updateUserProfileImage(db, userId, null)
+  return c.json({ ok: true })
+})
+
+// Serve a patron banner from R2. Public — banners are part of the public
+// profile (SKILL.md § 1). The `?v=` query on the stored URL handles cache-
+// busting, so the response itself may cache for a while. Same security
+// posture as the avatar serve route (see `nosniff` rationale there).
+app.get('/api/banners/:userId', async (c) => {
+  const userId = c.req.param('userId')
+  if (!isUuid(userId)) return c.text('Not found', 404)
+  const obj = await c.env.AVATARS.get(`banners/${userId}`)
+  if (!obj) {
+    return c.text('Not found', 404)
+  }
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': obj.httpMetadata?.contentType ?? 'image/webp',
+      'Cache-Control': 'public, max-age=604800',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  })
 })
 
 // The signed-in user's account settings — email, join date, linked sign-in
@@ -697,13 +1142,26 @@ app.get('/api/me/account', async (c) => {
     // Empty for a magic-link-only account (no `account` row) — the client
     // renders that as "Email link".
     providers,
-    // Patron read-only markers — the Settings page uses these to surface
-    // patron status (and the founding-patron badge) alongside the existing
-    // account info. Edits go through PATCH /api/me/patron.
+    // Full patron storefront — the Settings page reads this to render both
+    // the read-only markers (status, founder rank, since) and the editable
+    // controls (motto, slug, gilded, shimmer, victory flourish, …). Edits
+    // for the in-band fields go through PATCH /api/me/patron, which returns
+    // the updated block. The custom banner image is uploaded asynchronously
+    // via POST /api/me/banner (the URL ends up on `profileImage`, surfaced
+    // here so the UI can render the "currently set" state).
     patron: {
       isPatron: me.isPatron,
       founderRank: me.founderRank,
       patronSince: me.patronSince?.getTime() ?? null,
+      slug: me.patronSlug,
+      motto: me.patronMotto,
+      gildedNickname: me.patronGildedNickname,
+      cardBack: me.patronCardBack,
+      tableTheme: me.patronTableTheme,
+      vanityRoomCode: me.patronVanityRoomCode,
+      shimmerBanner: me.patronShimmerBanner,
+      victoryFlourish: me.patronVictoryFlourish,
+      profileImage: me.profileImage,
     },
   })
 })
@@ -720,18 +1178,36 @@ app.delete('/api/me/account', async (c) => {
     return c.json({ error: 'unauthorized' }, 401)
   }
   const userId = session.user.id
+  // Tighter limit on destructive endpoint — 3 per 5 minutes. Anonymisation
+  // is idempotent (the user row's already gone after the first call), so
+  // re-hits are no-ops; the limit is purely defence against a stuck client
+  // looping on its own success response.
+  const rate = await checkRateLimit(c.env, userId, 'account-delete', 3, 300_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
   const db = createDb(c.env.DB)
   await deleteUserAccount(db, userId, `deleted-${userId}@deleted.invalid`)
-  // Best-effort avatar purge — R2 delete is idempotent if there's no object.
+  // Best-effort R2 purges — both are idempotent if the object doesn't exist.
+  // Avatar + patron banner share the AVATARS bucket under their respective
+  // key prefixes.
   await c.env.AVATARS.delete(`avatars/${userId}`)
+  await c.env.AVATARS.delete(`banners/${userId}`)
   return c.json({ ok: true })
 })
 
 // Serve an avatar from R2. Public — avatars are public info (SKILL.md § 1) —
 // and loaded cross-origin by <img>. The `?v=` query on the stored URL handles
 // cache-busting, so the response itself may cache for a while.
+//
+// Security headers:
+//   - `X-Content-Type-Options: nosniff` so legacy browsers can't reinterpret
+//     the body as HTML/JS via content-sniffing.
+//   - The Content-Type is whatever the upload endpoint verified + stored
+//     (one of png/jpeg/webp). Defends against the "polyglot smuggled HTML"
+//     class of attack.
 app.get('/api/avatars/:userId', async (c) => {
-  const obj = await c.env.AVATARS.get(`avatars/${c.req.param('userId')}`)
+  const userId = c.req.param('userId')
+  if (!isUuid(userId)) return c.text('Not found', 404)
+  const obj = await c.env.AVATARS.get(`avatars/${userId}`)
   if (!obj) {
     return c.text('Not found', 404)
   }
@@ -739,6 +1215,7 @@ app.get('/api/avatars/:userId', async (c) => {
     headers: {
       'Content-Type': obj.httpMetadata?.contentType ?? 'image/webp',
       'Cache-Control': 'public, max-age=604800',
+      'X-Content-Type-Options': 'nosniff',
     },
   })
 })
@@ -805,7 +1282,12 @@ app.get('/api/admin/users', async (c) => {
 app.post('/api/admin/users/:userId/grant-patron', async (c) => {
   const adminId = await checkAdmin(c)
   if (!adminId) return c.json({ error: 'not_found' }, 404)
+  // 60 admin writes per minute. Plenty for legitimate bulk action; blocks a
+  // compromised admin token from doing huge damage in one window.
+  const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
   const targetId = c.req.param('userId')
+  if (!isUuid(targetId)) return c.json({ error: 'user_not_found' }, 404)
   const db = createDb(c.env.DB)
   const target = await getUserById(db, targetId)
   if (!target) return c.json({ error: 'user_not_found' }, 404)
@@ -821,15 +1303,24 @@ app.post('/api/admin/users/:userId/grant-patron', async (c) => {
 
 // Revoke patronage. Clears every cosmetic toggle, BUT keeps `founderRank`
 // and `patronSince` so the Hall of Patrons keeps the slot. The user can be
-// re-granted later without losing their founder position.
+// re-granted later without losing their founder position. We also delete
+// the R2 banner object — `revokePatronage` only nulls the DB pointer; the
+// R2 cleanup lives on the Worker side because R2 bindings don't reach into
+// the db package.
 app.post('/api/admin/users/:userId/revoke-patron', async (c) => {
   const adminId = await checkAdmin(c)
   if (!adminId) return c.json({ error: 'not_found' }, 404)
+  // Shares the same admin-write budget as grant-patron — 60/min combined.
+  const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
   const targetId = c.req.param('userId')
+  if (!isUuid(targetId)) return c.json({ error: 'user_not_found' }, 404)
   const db = createDb(c.env.DB)
   const target = await getUserById(db, targetId)
   if (!target) return c.json({ error: 'user_not_found' }, 404)
   await revokePatronage(db, targetId)
+  // Best-effort R2 cleanup — idempotent if the object doesn't exist.
+  await c.env.AVATARS.delete(`banners/${targetId}`)
   const next = await getUserById(db, targetId)
   return c.json({
     userId: next?.id,
@@ -869,6 +1360,9 @@ app.get('/api/ws', async (c) => {
 function sentryOptions(env: Env) {
   return {
     dsn: env.SENTRY_DSN_WORKER,
+    // Release tag — set via wrangler at deploy time (`--var SENTRY_RELEASE=...`).
+    // Unset locally → Sentry omits the tag.
+    release: env.SENTRY_RELEASE,
     tracesSampleRate: 0.1,
     sendDefaultPii: false,
     // Sentry Logs product. Metrics need no flag — on by default in SDK
@@ -897,4 +1391,8 @@ export const MatchmakingQueue = Sentry.instrumentDurableObjectWithSentry(
 export const RoomCodeRegistry = Sentry.instrumentDurableObjectWithSentry(
   sentryOptions,
   RoomCodeRegistryClass,
+)
+export const RateLimitRegistry = Sentry.instrumentDurableObjectWithSentry(
+  sentryOptions,
+  RateLimitRegistryClass,
 )

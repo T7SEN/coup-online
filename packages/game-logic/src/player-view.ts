@@ -34,6 +34,15 @@ export function buildPlayerView(state: GameState, viewerId: PlayerId): PlayerVie
       influence: s.influence.map((inf) => sliceInfluence(inf, isMe)),
       // ?? null guards a GameState rehydrated from before this field existed.
       eliminationOrder: s.eliminationOrder ?? null,
+      // Patron cosmetics — pass through unchanged. Defaults already applied
+      // server-side (the DO sets the seat fields from WS-token claims at
+      // game start). Omitting `undefined` fields keeps the wire payload
+      // small for non-patron seats.
+      isPatron: s.isPatron,
+      founderRank: s.founderRank,
+      gildedNickname: s.gildedNickname,
+      cardBackSkin: s.cardBackSkin,
+      victoryFlourish: s.victoryFlourish,
     }
   })
 
@@ -51,6 +60,8 @@ export function buildPlayerView(state: GameState, viewerId: PlayerId): PlayerVie
     // can gate the InfluencePickBar to the right player without leaking other
     // hidden state. SKILL.md § 3.1 — no card identities here, only the playerId.
     influenceLossPlayerId: state.influenceLossQueue[0] ?? null,
+    // Host's table theme — frozen at game start, broadcast to every seat.
+    tableTheme: state.tableTheme,
   }
 }
 

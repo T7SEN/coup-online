@@ -37,6 +37,17 @@ interface ProfileData {
     profileImage: string | null
   }
   stats: { played: number; wins: number }
+  // Patron storefront — public subset on /api/profile/:userId, full subset
+  // on /api/me/profile. Only the fields rendered by the crest matter here.
+  patron: {
+    isPatron: boolean
+    founderRank: number | null
+    patronSince: number | null
+    slug: string | null
+    motto: string | null
+    gildedNickname: boolean
+    shimmerBanner: boolean
+  }
   // Present only on the owner's own /api/me/profile response.
   matches?: {
     matchId: string
@@ -108,6 +119,12 @@ function ProfileBody({
           rating={user.rating}
           profileColor={user.profileColor}
           profileImage={user.profileImage}
+          isPatron={data.patron.isPatron}
+          founderRank={data.patron.founderRank}
+          gildedNickname={data.patron.gildedNickname}
+          motto={data.patron.motto}
+          slug={data.patron.slug}
+          shimmerBanner={data.patron.shimmerBanner}
         />
       ) : (
         <ProfileCrestView
@@ -117,6 +134,12 @@ function ProfileBody({
           rating={user.rating}
           profileColor={user.profileColor}
           profileImage={user.profileImage}
+          isPatron={data.patron.isPatron}
+          founderRank={data.patron.founderRank}
+          gildedNickname={data.patron.gildedNickname}
+          motto={data.patron.motto}
+          slug={data.patron.slug}
+          shimmerBanner={data.patron.shimmerBanner}
         />
       )}
 

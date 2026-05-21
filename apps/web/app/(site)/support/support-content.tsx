@@ -62,7 +62,7 @@ const PRIVILEGES: { icon: LucideIcon; title: string; desc: string }[] = [
   {
     icon: ImagePlus,
     title: 'Custom profile banner',
-    desc: 'Trade your crest’s preset colour for a banner image of your own.',
+    desc: 'Trade your crest’s preset color for a banner image of your own.',
   },
   {
     icon: BadgeCheck,
@@ -311,7 +311,7 @@ export function SupportContent() {
             <ChevronLeft className="size-8" aria-hidden />
           </button>
 
-          <div className="flex min-h-[12rem] min-w-0 flex-1 items-center justify-center overflow-hidden rounded-xl border border-gold/40 bg-gold/8 px-6 py-7 shadow-md">
+          <div className="flex min-h-48 min-w-0 flex-1 items-center justify-center overflow-hidden rounded-xl border border-gold/40 bg-gold/8 px-6 py-7 shadow-md">
             <div
               ref={cardRef}
               className="flex flex-col items-center gap-3 text-center"

@@ -4,6 +4,7 @@ import { useRef } from 'react'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 import type { PlayerSeat } from '@coup-online/protocol'
+import { GildedName } from '@/components/gilded-name'
 import {
   burstParticles,
   CoinCount,
@@ -11,6 +12,7 @@ import {
   MOTION_ENABLED,
   NO_REDUCED_MOTION,
 } from '@/components/motion'
+import { PatronBadge } from '@/components/patron-badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -81,9 +83,17 @@ export function PlayerHand({
                 {seat.displayName.charAt(0).toUpperCase()}
               </AvatarFallback>
             </Avatar>
-            <span dir="auto" className="font-medium">
-              {seat.displayName}
-            </span>
+            <GildedName
+              name={seat.displayName}
+              gilded={seat.gildedNickname ?? false}
+              dir="auto"
+              className="font-medium"
+            />
+            <PatronBadge
+              isPatron={seat.isPatron ?? false}
+              founderRank={seat.founderRank ?? null}
+              size="xs"
+            />
             <span className="text-xs text-muted-foreground">(you)</span>
           </span>
           <span
@@ -107,7 +117,12 @@ export function PlayerHand({
         </div>
         <div className="flex justify-center gap-3">
           {seat.influence.map((inf, i) => (
-            <InfluenceCard key={i} influence={inf} size="md" />
+            <InfluenceCard
+              key={i}
+              influence={inf}
+              size="md"
+              cardBackSkin={seat.cardBackSkin}
+            />
           ))}
         </div>
       </div>

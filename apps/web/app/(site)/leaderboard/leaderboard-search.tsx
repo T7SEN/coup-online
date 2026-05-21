@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Loader2, Search, X } from 'lucide-react'
+import { GildedName } from '@/components/gilded-name'
+import { PatronBadge } from '@/components/patron-badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Input } from '@/components/ui/input'
 
@@ -19,6 +21,9 @@ interface PlayerResult {
   userId: string
   displayName: string
   image: string | null
+  isPatron: boolean
+  founderRank: number | null
+  patronGildedNickname: boolean
   rating: number
   played: number
   wins: number
@@ -151,8 +156,18 @@ export function LeaderboardSearch() {
                         </AvatarFallback>
                       </Avatar>
                       <div className="min-w-0 flex-1">
-                        <p dir="auto" className="truncate font-medium">
-                          {p.displayName}
+                        <p className="flex items-center gap-1.5 truncate font-medium">
+                          <GildedName
+                            name={p.displayName}
+                            gilded={p.patronGildedNickname}
+                            dir="auto"
+                            className="truncate"
+                          />
+                          <PatronBadge
+                            isPatron={p.isPatron}
+                            founderRank={p.founderRank}
+                            size="xs"
+                          />
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {p.wins}W · {Math.max(0, p.played - p.wins)}L

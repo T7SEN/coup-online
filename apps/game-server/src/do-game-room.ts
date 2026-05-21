@@ -23,7 +23,7 @@ import {
   IllegalActionError,
   type GameState,
 } from '@coup-online/game-logic'
-import { verifyJwt } from './auth'
+import { verifyJwt, type JwtClaims } from './auth'
 import { persistMatchResult } from './db-helpers'
 import { logger } from './logger'
 import { isOriginAllowed } from './origin'
@@ -57,6 +57,16 @@ const CLOSE_KICKED = 4004
 interface LobbyEntry {
   readonly playerId: string
   readonly displayName: string
+  // Patron cosmetics — frozen from the WS-token claims at first join. The
+  // host's `tableTheme` is captured at room creation; other fields propagate
+  // to ServerSeat at game start. Optional so a persisted lobby state from
+  // before Phase 4 reads cleanly.
+  readonly isPatron?: boolean
+  readonly founderRank?: number | null
+  readonly gildedNickname?: boolean
+  readonly cardBackSkin?: string | null
+  readonly tableTheme?: string | null
+  readonly victoryFlourish?: boolean
 }
 
 interface PersistedState {
@@ -141,7 +151,7 @@ export class GameRoom extends DurableObject<Env> {
       `displayName:${claims.displayName}`,
     ])
 
-    await this.handleJoin(server, claims.userId, claims.displayName)
+    await this.handleJoin(server, claims)
     return new Response(null, { status: 101, webSocket: client })
   }
 
@@ -326,11 +336,25 @@ export class GameRoom extends DurableObject<Env> {
 
   private async handleJoin(
     ws: WebSocket,
-    userId: string,
-    displayName: string,
+    claims: JwtClaims,
   ): Promise<void> {
+    const userId = claims.userId
+    const displayName = claims.displayName
     const matchId = this.ctx.id.name ?? this.ctx.id.toString()
     let state = await this.loadState()
+
+    // Build the lobby entry from the JWT claims. Patron fields stay undefined
+    // when the user is not a patron (the token omits them then).
+    const lobbyEntry: LobbyEntry = {
+      playerId: userId,
+      displayName,
+      isPatron: claims.isPatron,
+      founderRank: claims.founderRank,
+      gildedNickname: claims.gildedNickname,
+      cardBackSkin: claims.cardBackSkin,
+      tableTheme: claims.tableTheme,
+      victoryFlourish: claims.victoryFlourish,
+    }
 
     if (!state) {
       state = {
@@ -339,7 +363,7 @@ export class GameRoom extends DurableObject<Env> {
         // First joiner becomes the host. Stable across reconnects of the same
         // userId; transferred to the next-oldest lobby entry on disconnect.
         hostPlayerId: userId,
-        lobby: [{ playerId: userId, displayName }],
+        lobby: [lobbyEntry],
         game: null,
         disconnects: {},
       }
@@ -352,7 +376,7 @@ export class GameRoom extends DurableObject<Env> {
           ws.close(CLOSE_MATCH_FULL, 'Match lobby is full')
           return
         }
-        state.lobby.push({ playerId: userId, displayName })
+        state.lobby.push(lobbyEntry)
       }
       ensureHost(state)
     } else if (state.lobbyPhase === 'IN_GAME' && state.game) {
@@ -431,7 +455,14 @@ export class GameRoom extends DurableObject<Env> {
         )
       }
       const matchId = this.ctx.id.name ?? this.ctx.id.toString()
-      state.game = dealInitialState(matchId, state.lobby)
+      // The host's table theme applies to every seat — capture it from the
+      // host's lobby entry. Lobby entries already carry full patron
+      // cosmetics, so dealInitialState gets seat-level patron data for free
+      // via the same array.
+      const host = state.lobby.find((e) => e.playerId === state.hostPlayerId)
+      state.game = dealInitialState(matchId, state.lobby, {
+        tableTheme: host?.tableTheme ?? null,
+      })
       state.lobbyPhase = 'IN_GAME'
       state.startedAt = Date.now()
       await this.afterMutation(state)

@@ -24,12 +24,25 @@ class_name = "MatchmakingQueue"
 name = "ROOM_CODE_REGISTRY"
 class_name = "RoomCodeRegistry"
 
+# HTTP rate-limit registry — a single DO instance holds per-user sliding-
+# window counters for sensitive endpoints (uploads, patches, account
+# deletion, admin actions). See src/do-rate-limit.ts.
+[[durable_objects.bindings]]
+name = "RATE_LIMIT"
+class_name = "RateLimitRegistry"
+
 # DO migrations.
 # per SKILL.md § 3.3 — SQLite-backed only. `new_classes` would create key-value DOs
 # (paid-plan only) and break the free-tier budget. Never change this to `new_classes`.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["GameRoom", "MatchmakingQueue", "RoomCodeRegistry"]
+
+# v2 adds the rate-limit registry. New DO classes go in a new migration tag —
+# DO migrations are append-only once deployed.
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RateLimitRegistry"]
 
 # D1 binding — uncomment after running once:
 #   pnpm --filter @coup-online/game-server exec wrangler d1 create coup-online-db

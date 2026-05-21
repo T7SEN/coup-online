@@ -1,10 +1,10 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
-import { KeyRound, Plus, Swords } from 'lucide-react'
+import { KeyRound, Plus, Sparkles, Swords } from 'lucide-react'
 import { MOTION_ENABLED, NO_REDUCED_MOTION } from '@/components/motion'
 import { OrnamentDivider } from '@/components/site/ornament-divider'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -107,14 +107,52 @@ export function PlayHub() {
   const user = session?.user
   const canJoin = !busy && parseMatchCode(matchCode).length > 0
 
-  function handleCreate() {
+  // Patron vanity room code — fetched on mount from /api/me/profile (the
+  // session client doesn't carry patron columns). Null while loading, the
+  // code while available, '' if the patron hasn't set one. Non-patrons stay
+  // at null and never see the extra CTA. The async IIFE + try/catch shape is
+  // here on purpose: a bare `.then().catch()` chain still leaks the
+  // AbortError to Next.js' dev overlay during strict-mode double-mount,
+  // because the rejection traverses two microtasks before the .catch runs.
+  // Awaiting inside try/catch lets us classify the rejection exactly once.
+  const [vanityCode, setVanityCode] = useState<string | null>(null)
+  useEffect(() => {
+    if (!user?.id) return
+    const ctrl = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch('/api/me/profile', {
+          cache: 'no-store',
+          signal: ctrl.signal,
+        })
+        if (!res.ok) return
+        const json = (await res.json()) as {
+          patron?: { isPatron: boolean; vanityRoomCode: string | null }
+        }
+        if (json.patron?.isPatron && json.patron.vanityRoomCode) {
+          setVanityCode(json.patron.vanityRoomCode)
+        }
+      } catch (err) {
+        // AbortError on unmount / dependency change is expected.
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        // Network or parse failure → non-patron defaults stand.
+      }
+    })()
+    return () => ctrl.abort()
+  }, [user?.id])
+
+  function handleCreate(code?: string) {
     if (isPending) return
     if (!user) {
       openSignIn()
       return
     }
     setBusy(true)
-    router.push(`/room/${encodeURIComponent(generateMatchCode())}`)
+    const target =
+      code && parseMatchCode(code).length > 0
+        ? parseMatchCode(code)
+        : generateMatchCode()
+    router.push(`/room/${encodeURIComponent(target)}`)
   }
 
   function handleJoin() {
@@ -205,14 +243,41 @@ export function PlayHub() {
                   friends.
                 </p>
               </div>
-              <Button
-                size="lg"
-                className="mt-auto w-full"
-                onClick={handleCreate}
-                disabled={busy}
-              >
-                Create match
-              </Button>
+              <div className="mt-auto flex flex-col gap-2">
+                {vanityCode && (
+                  <>
+                    {/* Patron primary CTA — uses the saved vanity code. */}
+                    <Button
+                      size="lg"
+                      className="w-full"
+                      onClick={() => handleCreate(vanityCode)}
+                      disabled={busy}
+                    >
+                      <Sparkles className="mr-1.5 size-4" aria-hidden />
+                      Create with {vanityCode}
+                    </Button>
+                    {/* Fallback: random code. */}
+                    <button
+                      type="button"
+                      onClick={() => handleCreate()}
+                      disabled={busy}
+                      className="cursor-pointer text-center text-xs text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      or use a random code
+                    </button>
+                  </>
+                )}
+                {!vanityCode && (
+                  <Button
+                    size="lg"
+                    className="w-full"
+                    onClick={() => handleCreate()}
+                    disabled={busy}
+                  >
+                    Create match
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
 

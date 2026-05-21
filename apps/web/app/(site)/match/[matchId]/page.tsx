@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { headers } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
 import { ChevronLeft, Crown } from 'lucide-react'
+import { GildedName } from '@/components/gilded-name'
+import { PatronBadge } from '@/components/patron-badge'
 import { OrnamentDivider } from '@/components/site/ornament-divider'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -26,6 +28,9 @@ interface MatchPlayer {
   userId: string
   displayName: string
   image: string | null
+  isPatron: boolean
+  founderRank: number | null
+  patronGildedNickname: boolean
   seat: number
   finishingPosition: number
   ratingBefore: number
@@ -156,8 +161,18 @@ function MatchBody({ data }: { data: MatchData }) {
               Victor
               {winner.userId === viewerUserId && <YouChip />}
             </p>
-            <h2 dir="auto" className="truncate font-display text-xl tracking-wide">
-              {winner.displayName}
+            <h2 className="flex items-center gap-2 truncate font-display text-xl tracking-wide">
+              <GildedName
+                name={winner.displayName}
+                gilded={winner.patronGildedNickname}
+                dir="auto"
+                className="truncate"
+              />
+              <PatronBadge
+                isPatron={winner.isPatron}
+                founderRank={winner.founderRank}
+                size="sm"
+              />
             </h2>
             <p className="text-sm text-muted-foreground">
               Seat {winner.seat + 1}
@@ -199,11 +214,18 @@ function MatchBody({ data }: { data: MatchData }) {
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
-                    <p
-                      dir="auto"
-                      className="flex items-center gap-2 truncate font-medium"
-                    >
-                      {p.displayName}
+                    <p className="flex items-center gap-2 truncate font-medium">
+                      <GildedName
+                        name={p.displayName}
+                        gilded={p.patronGildedNickname}
+                        dir="auto"
+                        className="truncate"
+                      />
+                      <PatronBadge
+                        isPatron={p.isPatron}
+                        founderRank={p.founderRank}
+                        size="xs"
+                      />
                       {isViewer && <YouChip />}
                     </p>
                     <p className="text-xs text-muted-foreground">

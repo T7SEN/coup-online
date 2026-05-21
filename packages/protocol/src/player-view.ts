@@ -32,6 +32,16 @@ export const PlayerSeat = z.object({
   // The client renders final standings from this; finishing position is the
   // reverse of elimination order.
   eliminationOrder: z.number().int().positive().nullable(),
+  // Patron cosmetic markers — set when the seated user is a patron with the
+  // corresponding perk enabled. All public knowledge (the supporter crest is
+  // intentionally visible to everyone at the table). `null` / `false` for
+  // non-patrons or unset toggles. Optional so an in-flight PlayerView from
+  // before Phase 4 still validates after a deploy.
+  isPatron: z.boolean().optional(),
+  founderRank: z.number().int().positive().nullable().optional(),
+  gildedNickname: z.boolean().optional(),
+  cardBackSkin: z.string().nullable().optional(),
+  victoryFlourish: z.boolean().optional(),
 })
 export type PlayerSeat = z.infer<typeof PlayerSeat>
 
@@ -73,5 +83,9 @@ export const PlayerView = z.object({
   // actually being asked to pick — avoids server-rejected `not_your_pick`
   // errors from non-picker clicks. SKILL.md § 4.7.
   influenceLossPlayerId: PlayerId.nullable(),
+  // The host's table theme — applied to the room felt + ornament colours
+  // for everyone seated. Null = use the standard green felt. Optional so a
+  // PlayerView from before Phase 4 still validates after a deploy.
+  tableTheme: z.string().nullable().optional(),
 })
 export type PlayerView = z.infer<typeof PlayerView>

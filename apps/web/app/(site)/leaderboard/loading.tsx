@@ -14,14 +14,14 @@ export default function LeaderboardLoading() {
         <Skeleton className="h-4 w-60" />
       </div>
       <div className="flex flex-col gap-6">
-        <Skeleton className="h-[6.5rem] w-full rounded-lg" />
+        <Skeleton className="h-26 w-full rounded-lg" />
         <div className="grid grid-cols-2 gap-3">
           <Skeleton className="h-44 rounded-md" />
           <Skeleton className="h-44 rounded-md" />
         </div>
         <ol className="flex flex-col gap-1.5">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-[3.75rem] w-full rounded-md" />
+            <Skeleton key={i} className="h-15 w-full rounded-md" />
           ))}
         </ol>
       </div>

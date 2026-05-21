@@ -2,9 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { LogOut, Settings, Shield, UserRound } from 'lucide-react'
 import { isAdminEmail } from '@coup-online/protocol'
+import { GildedName } from '@/components/gilded-name'
+import { PatronBadge } from '@/components/patron-badge'
 import {
   MobileNav,
   MobileNavHeader,
@@ -51,6 +53,47 @@ export function SiteNavbar() {
   // Server-side gates re-verify on /admin and /api/admin/* so this is purely
   // a UI courtesy, not a security boundary.
   const isAdmin = isAdminEmail(user?.email ?? null)
+  // Patron decoration for the account pill. Fetched on mount (the client
+  // session doesn't carry patron columns). Defaults render the pill as
+  // plain — no patron flicker for non-patrons. The async IIFE + try/catch
+  // shape is on purpose: a bare `.then().catch()` chain still leaks an
+  // AbortError to Next.js' dev overlay during strict-mode double-mount.
+  const [patron, setPatron] = useState<{
+    isPatron: boolean
+    founderRank: number | null
+    gildedNickname: boolean
+  }>({ isPatron: false, founderRank: null, gildedNickname: false })
+  useEffect(() => {
+    if (!user?.id) return
+    const ctrl = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch('/api/me/profile', {
+          cache: 'no-store',
+          signal: ctrl.signal,
+        })
+        if (!res.ok) return
+        const json = (await res.json()) as {
+          patron?: {
+            isPatron: boolean
+            founderRank: number | null
+            gildedNickname: boolean
+          }
+        }
+        if (json.patron) {
+          setPatron({
+            isPatron: json.patron.isPatron,
+            founderRank: json.patron.founderRank,
+            gildedNickname: json.patron.gildedNickname,
+          })
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        // Other failures → non-patron defaults stay in place.
+      }
+    })()
+    return () => ctrl.abort()
+  }, [user?.id])
   const links = PUBLIC_LINKS
 
   // Resolve the active link here so NavItems only needs the matched href:
@@ -88,6 +131,9 @@ export function SiteNavbar() {
               image={user.image}
               profileHref={profileHref}
               isAdmin={isAdmin}
+              isPatron={patron.isPatron}
+              founderRank={patron.founderRank}
+              gildedNickname={patron.gildedNickname}
               onSignOut={handleSignOut}
             />
           ) : (
@@ -145,9 +191,17 @@ export function SiteNavbar() {
                     {displayName.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
-                <span dir="auto" className="truncate text-sm font-medium">
-                  {displayName}
-                </span>
+                <GildedName
+                  name={displayName}
+                  gilded={patron.gildedNickname}
+                  dir="auto"
+                  className="truncate text-sm font-medium"
+                />
+                <PatronBadge
+                  isPatron={patron.isPatron}
+                  founderRank={patron.founderRank}
+                  size="xs"
+                />
               </div>
               <Link
                 href={profileHref}

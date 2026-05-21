@@ -9,6 +9,9 @@ import {
   displayNameErrorMessage,
   validateDisplayName,
 } from '@coup-online/protocol'
+import { GildedName } from '@/components/gilded-name'
+import { PatronBadge } from '@/components/patron-badge'
+import { VanitySlugChip } from '@/components/vanity-slug-chip'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
@@ -42,6 +45,12 @@ interface ProfileCrestProps {
   rating: number
   profileColor: string
   profileImage: string | null
+  isPatron: boolean
+  founderRank: number | null
+  gildedNickname: boolean
+  motto: string | null
+  slug: string | null
+  shimmerBanner: boolean
 }
 
 export function ProfileCrest({
@@ -51,6 +60,12 @@ export function ProfileCrest({
   rating,
   profileColor: initialColor,
   profileImage,
+  isPatron,
+  founderRank,
+  gildedNickname,
+  motto,
+  slug,
+  shimmerBanner,
 }: ProfileCrestProps) {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -224,6 +239,15 @@ export function ProfileCrest({
         {/* Soft sheen so the banner reads as a lit surface. */}
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_25%_-20%,rgba(255,255,255,0.28),transparent_70%)]" />
 
+        {/* Living banner — the gold-shimmer perk. CSS keyframe in
+            globals.css; honours `prefers-reduced-motion` via `motion-safe`. */}
+        {shimmerBanner && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 -translate-x-full opacity-0 bg-gradient-to-r from-transparent via-[oklch(0.86_0.14_84_/_0.35)] to-transparent motion-safe:animate-[banner-shimmer_6.5s_linear_infinite]"
+          />
+        )}
+
         {/* Banner edit pin — opens the color palette. */}
         <button
           type="button"
@@ -379,25 +403,46 @@ export function ProfileCrest({
                 </button>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={startNameEdit}
-                aria-label="Edit nickname"
-                className="group/name relative inline-flex cursor-pointer items-center"
-              >
-                <h1
-                  dir="auto"
-                  className="border-b-2 border-transparent pb-0.5 font-display text-2xl tracking-wide transition-colors group-hover/name:border-gold/50 sm:text-3xl"
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={startNameEdit}
+                  aria-label="Edit nickname"
+                  className="group/name relative inline-flex cursor-pointer items-center"
                 >
-                  {name}
-                </h1>
-                <Pencil className="pointer-events-none absolute left-full ml-2 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/name:opacity-100 group-focus-visible/name:opacity-100" />
-              </button>
+                  <h1
+                    className={cn(
+                      'border-b-2 border-transparent pb-0.5 font-display text-2xl tracking-wide transition-colors group-hover/name:border-gold/50 sm:text-3xl',
+                    )}
+                  >
+                    <GildedName
+                      name={name}
+                      gilded={gildedNickname}
+                      dir="auto"
+                    />
+                  </h1>
+                  <Pencil className="pointer-events-none absolute left-full ml-2 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/name:opacity-100 group-focus-visible/name:opacity-100" />
+                </button>
+                <PatronBadge
+                  isPatron={isPatron}
+                  founderRank={founderRank}
+                  size="sm"
+                />
+              </div>
             )}
 
             <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-0.5 text-xs font-medium tracking-wide text-gold">
               Ranked #{rank}
             </span>
+            {motto && motto.trim().length > 0 && (
+              <p
+                dir="auto"
+                className="text-sm text-muted-foreground italic"
+              >
+                &ldquo;{motto}&rdquo;
+              </p>
+            )}
+            {slug && slug.length > 0 && <VanitySlugChip slug={slug} />}
           </div>
 
           {/* Rating. */}

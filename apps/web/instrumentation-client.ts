@@ -10,6 +10,11 @@ import * as Sentry from '@sentry/nextjs'
 // metric worth tracking.
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  // Release tag — typically the git SHA, set by CI/CD as
+  //   SENTRY_RELEASE=$GITHUB_SHA  (or whatever your runner exposes)
+  // and surfaced to the browser bundle via next.config.ts env. When unset
+  // (local dev), Sentry omits the tag — that's the desired behaviour.
+  release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
   tracesSampleRate: process.env.NODE_ENV === 'development' ? 1.0 : 0.1,
   sendDefaultPii: false,
   // Sentry Logs product.

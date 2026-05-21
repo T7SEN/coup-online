@@ -142,6 +142,39 @@ html {
   background: transparent;
 }
 
+/* Patron living-banner shimmer. A gold band sweeps left → right across the
+   profile banner on a slow loop, with a pause off-screen between sweeps so
+   the eye gets to rest. Used by ProfileCrest + ProfileCrestView when
+   `patronShimmerBanner` is on, gated by `motion-safe:` at the call site so
+   reduced-motion visitors get a still banner.
+   The travel is `linear` so the band moves at a constant velocity (no
+   ease-in-out "stall" at the right edge). Opacity is keyframed too: the band
+   fades in while still off-screen left, holds visible across the sweep, then
+   fades out as it leaves — so the wrap-around from translateX(120%) back to
+   translateX(-120%) at the loop boundary is invisible (opacity is 0 on both
+   sides of it). The 55% → 100% tail is the deliberate inter-sweep pause. */
+@keyframes banner-shimmer {
+  0% {
+    transform: translateX(-120%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  45% {
+    transform: translateX(120%);
+    opacity: 1;
+  }
+  55% {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+}
+
 /* Home-page section snapping. app/(site)/page.tsx adds `snap-home` to <html>
    while it is mounted, so snapping never leaks onto the leaderboard / profile
    / room pages. Every section is min-h-svh — never shorter than the viewport —

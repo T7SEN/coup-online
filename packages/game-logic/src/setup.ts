@@ -14,10 +14,25 @@ export const STARTING_COINS = 2
 export const STARTING_INFLUENCE = 2
 
 // Input shape for dealInitialState. Caller is responsible for ensuring playerIds
-// are unique and authenticated upstream.
+// are unique and authenticated upstream. Patron cosmetic fields are optional —
+// non-patron joiners have them undefined / false, and the seat then carries
+// no patron markers.
 export interface SeatInput {
   readonly playerId: PlayerId
   readonly displayName: string
+  readonly isPatron?: boolean
+  readonly founderRank?: number | null
+  readonly gildedNickname?: boolean
+  readonly cardBackSkin?: string | null
+  readonly victoryFlourish?: boolean
+}
+
+// Options for dealInitialState — game-wide settings that aren't per-seat.
+export interface DealOptions {
+  // The host's chosen table theme, applied to the room felt + ornament for
+  // every seat. Null = the default green felt. Frozen at game start; mid-
+  // game changes to the host's preference don't migrate.
+  readonly tableTheme?: string | null
 }
 
 // Build the initial GameState for a fresh match.
@@ -27,7 +42,13 @@ export interface SeatInput {
 //   - Each player starts with 2 coins.
 //   - Random first turn (SKILL.md § 4.2). Seat order = caller's join order, immutable.
 //   - Initial phase = AWAITING_ACTION (SKILL.md § 3.2).
-export function dealInitialState(matchId: MatchId, players: readonly SeatInput[]): GameState {
+//   - Patron cosmetics on SeatInput are carried onto ServerSeat verbatim.
+//   - `options.tableTheme` is captured on GameState so PlayerView can broadcast it.
+export function dealInitialState(
+  matchId: MatchId,
+  players: readonly SeatInput[],
+  options: DealOptions = {},
+): GameState {
   if (players.length < MIN_PLAYERS || players.length > MAX_PLAYERS) {
     throw new Error(
       `dealInitialState: Coup requires ${MIN_PLAYERS}-${MAX_PLAYERS} players (got ${players.length})`,
@@ -45,6 +66,12 @@ export function dealInitialState(matchId: MatchId, players: readonly SeatInput[]
       isDisconnected: false,
       influence: dealt.map((kind) => ({ status: 'face-down' as const, kind })),
       eliminationOrder: null,
+      // Patron cosmetics — pass through (or undefined for non-patrons).
+      isPatron: p.isPatron,
+      founderRank: p.founderRank,
+      gildedNickname: p.gildedNickname,
+      cardBackSkin: p.cardBackSkin,
+      victoryFlourish: p.victoryFlourish,
     }
   })
 
@@ -60,5 +87,6 @@ export function dealInitialState(matchId: MatchId, players: readonly SeatInput[]
     influenceLossQueue: [],
     exchangePool: null,
     blockWindowPending: false,
+    tableTheme: options.tableTheme ?? null,
   }
 }

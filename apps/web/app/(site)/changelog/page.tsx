@@ -69,6 +69,54 @@ const FOLIOS: Folio[] = [
         text: 'Patron storefront — the database, queries, and Worker endpoints behind the twelve patron privileges. All inert until the cosmetics ship in upcoming releases, but the data is in place: founder rank, supporter crest, gilded nickname, motto, vanity slug, card-back skin, table theme, vanity room code, living banner, victory flourish.',
       },
       {
+        tag: 'Added',
+        text: 'A private /admin page for the maintainer — search any user by email or nickname, grant or revoke patronage. Returns 404 to everyone else, both at the page and the API level. Used to bestow patron status until a real payment backend lands.',
+      },
+      {
+        tag: 'Added',
+        text: 'Patron cosmetics across the site — supporter crest and founding-patron mark beside the name in the navbar, leaderboard (champion, runners-up, ranked rows, search), profile, and match summary; the gilded-nickname privilege renders names in gold leaf wherever they appear; the profile shows the patron’s motto beneath the name.',
+      },
+      {
+        tag: 'Added',
+        text: 'The Hall of Patrons now reads the real list from the game server — once a name is in the Hall, it stays there even if the patronage lapses; the closing inscription updates with the count.',
+      },
+      {
+        tag: 'Added',
+        text: 'A Patronage section in Settings — read-only status (patron since, founding patron rank), and an editable form for patrons: motto, vanity slug, gilded-nickname toggle, living-banner toggle, victory-flourish toggle. Saves go through PATCH /api/me/patron with sparse-patch semantics.',
+      },
+      {
+        tag: 'Added',
+        text: 'Vanity URLs — patrons can claim a slug and share /u/<slug>, which resolves to their profile. The slug shows beneath the motto on their profile crest.',
+      },
+      {
+        tag: 'Added',
+        text: 'Vanity room codes — patrons see a "Create with <code>" button on the play hub that opens a room at their saved code, with a small "or use a random code" fallback.',
+      },
+      {
+        tag: 'Added',
+        text: 'Card-back skin and table-theme pickers in the Settings Patronage section — four designs each (Parchment / Oxblood / Forest / Ivory; Standard / Oxblood Court / Forest / Midnight) plus a "Default" tile to revert. The in-room renderer follows in a future release; the picker saves the choice today.',
+      },
+      {
+        tag: 'Added',
+        text: 'Living banner — when a patron turns it on, a gentle gold shimmer travels across their profile banner on a slow loop. Pure CSS keyframe, honours prefers-reduced-motion.',
+      },
+      {
+        tag: 'Added',
+        text: 'Patron card-back skins live in-game — the back of every face-down card in a patron’s hand renders in their chosen skin (Parchment / Oxblood / Forest / Ivory). Choice flows from Settings → WS-token claim → seat → InfluenceCard renderer.',
+      },
+      {
+        tag: 'Added',
+        text: 'Patron table themes live in-game — the host’s chosen felt (Standard / Oxblood Court / Forest / Midnight) paints the room background and vignette for everyone seated. The theme is captured at game start; mid-match changes to the host’s preference don’t migrate.',
+      },
+      {
+        tag: 'Added',
+        text: 'Patron victory flourish — when a patron with the privilege wins a match, a second, denser gold burst fires across the over-panel a beat after the standard flourish. Reduced-motion visitors get the static heading either way.',
+      },
+      {
+        tag: 'Added',
+        text: 'Custom profile banner — patrons can upload their own image to replace the preset banner colour. The picker resizes to 1200×240 WebP client-side, the Worker stores it in R2 under banners/<userId>, and the profile crest renders it via object-cover. Cleared on revoke or account deletion, R2 and DB both.',
+      },
+      {
         tag: 'Refined',
         text: 'The site now uses a slim gold scrollbar in place of the default browser one.',
       },

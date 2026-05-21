@@ -49,6 +49,18 @@ export async function updateUserImage(db: Db, userId: string, image: string) {
   await db.update(user).set({ image }).where(eq(user.id, userId))
 }
 
+// Patron custom banner — stored on `user.profileImage` (the column was added
+// in 0001_shallow_vargas as groundwork for this perk). `image` is the
+// Worker-side URL that serves the R2 object; pass `null` to clear the
+// banner and fall back to the preset profileColor backdrop.
+export async function updateUserProfileImage(
+  db: Db,
+  userId: string,
+  image: string | null,
+) {
+  await db.update(user).set({ profileImage: image }).where(eq(user.id, userId))
+}
+
 // Profile crest banner color — one of a fixed preset palette. The caller
 // (Worker /api/me/profile PATCH) validates the key against the allowed set
 // before this runs.
@@ -393,16 +405,23 @@ export async function grantPatronage(db: Db, userId: string) {
     .where(eq(user.id, userId))
 }
 
-// Revoke patronage. Sets isPatron = false and clears the cosmetic toggles,
-// but DELIBERATELY leaves `founderRank` and `patronSince` in place — once
-// someone is founder #N, that slot is theirs forever (the Hall keeps showing
-// the seat with their name). Same logic that `deleteUserAccount` applies on
-// anonymise, exposed here as its own helper for the admin tool.
+// Revoke patronage. Sets isPatron = false and clears the cosmetic toggles
+// (including the custom banner image URL), but DELIBERATELY leaves
+// `founderRank` and `patronSince` in place — once someone is founder #N,
+// that slot is theirs forever (the Hall keeps showing the seat with their
+// name). Same logic that `deleteUserAccount` applies on anonymise, exposed
+// here as its own helper for the admin tool.
+//
+// NOTE: the R2 object behind `profileImage` is NOT deleted here — R2 lives
+// on the Worker, not in this package. The admin endpoint that calls this
+// also calls `env.AVATARS.delete('banners/<userId>')` so the object can't
+// outlive the URL.
 export async function revokePatronage(db: Db, userId: string) {
   await db
     .update(user)
     .set({
       isPatron: false,
+      profileImage: null,
       patronMotto: null,
       patronSlug: null,
       patronGildedNickname: false,

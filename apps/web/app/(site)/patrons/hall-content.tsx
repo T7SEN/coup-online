@@ -53,8 +53,16 @@ const NUMERALS = [
 ]
 const FOUNDING_LIMIT = NUMERALS.length
 
-// No patrons yet — names line up with NUMERALS by index.
-const PATRONS: string[] = []
+// Patron data flows in from the server (see ./page.tsx → /api/patrons). Each
+// entry carries its founder rank (1–10), which we map onto the I–X slot.
+interface HallPatron {
+  userId: string
+  founderRank: number
+  displayName: string
+  image: string | null
+  slug: string | null
+  patronSince: number | null
+}
 
 // One row of the honour roll. Calligraphic numeral · centred name · flourish.
 // The whole row is a `group/row` so CSS hover can light up multiple children;
@@ -108,8 +116,12 @@ function Entry({ numeral, name }: { numeral: string; name?: string }) {
   )
 }
 
-export function HallContent() {
+export function HallContent({ patrons }: { patrons: HallPatron[] }) {
   const ref = useRef<HTMLDivElement>(null)
+
+  // Index by founder rank for O(1) lookup at render time.
+  const byRank = new Map<number, HallPatron>()
+  for (const p of patrons) byRank.set(p.founderRank, p)
 
   useGSAP(
     () => {
@@ -207,7 +219,7 @@ export function HallContent() {
     { scope: ref },
   )
 
-  const filled = PATRONS.length
+  const filled = patrons.length
 
   return (
     <div ref={ref} className="flex flex-col gap-6">
@@ -269,9 +281,17 @@ export function HallContent() {
               whole page fits in the viewport. Slim gold-tinted webkit
               scrollbar; top + bottom fade-edge mask. */}
           <ol className="relative flex max-h-72 flex-col overflow-y-auto py-3 mask-[linear-gradient(to_bottom,transparent,black_8%,black_92%,transparent)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gold/40 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:w-1 sm:max-h-80">
-            {NUMERALS.map((numeral, i) => (
-              <Entry key={numeral} numeral={numeral} name={PATRONS[i]} />
-            ))}
+            {NUMERALS.map((numeral, i) => {
+              // founderRank is 1-indexed (1..10); array index is 0..9.
+              const slot = byRank.get(i + 1)
+              return (
+                <Entry
+                  key={numeral}
+                  numeral={numeral}
+                  name={slot?.displayName}
+                />
+              )
+            })}
           </ol>
         </div>
 
@@ -301,8 +321,11 @@ export function HallContent() {
           {filled} of {FOUNDING_LIMIT} lines inscribed
         </p>
         <p className="max-w-xl text-pretty text-muted-foreground">
-          The patronage programme is yet to open. The first ten to support
-          the project will be remembered as Founding patrons.
+          {filled === 0
+            ? 'The patronage programme is yet to open. The first ten to support the project will be remembered as Founding patrons.'
+            : filled < FOUNDING_LIMIT
+              ? `With thanks to the ${filled === 1 ? 'first patron' : `first ${filled} patrons`}. ${FOUNDING_LIMIT - filled} Founding ${FOUNDING_LIMIT - filled === 1 ? 'slot remains' : 'slots remain'} for those who back the project early.`
+              : 'The Founding ten are complete. With deep thanks to every name in the Hall.'}
         </p>
         <Button asChild size="lg" className={CTA_CLASS}>
           <Link href="/support">Become a patron</Link>

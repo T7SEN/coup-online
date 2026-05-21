@@ -24,7 +24,7 @@ const CTA_CLASS =
 
 // Hover treatment for the fact tiles + story cards — the gold border
 // brightens and a shadow lifts the element off the page. The transition is
-// restricted to border-colour + box-shadow ON PURPOSE: it must never cover
+// restricted to border-color + box-shadow ON PURPOSE: it must never cover
 // opacity or transform, or it fights the GSAP entrance (which owns those)
 // and the element gets stuck mid-animation, invisible.
 const HOVER =
@@ -173,7 +173,7 @@ export function AboutContent() {
             data-a="fact"
             key={f.label}
             className={cn(
-              'flex flex-col items-center gap-0.5 rounded-md border border-gold/30 bg-gold/[0.06] px-3 py-4 text-center',
+              'flex flex-col items-center gap-0.5 rounded-md border border-gold/30 bg-gold/6 px-3 py-4 text-center',
               HOVER,
             )}
           >

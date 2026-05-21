@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Card, CardContent } from '@/components/ui/card'
 import { fetchWorker } from '@/lib/worker-fetch'
 import { DeleteAccountCard, SignOutButton } from './settings-actions'
+import { PatronageCard, type PatronStorefront } from './patronage-card'
 
 // Account settings. Server Component: forwards the session cookie to the
 // Worker's /api/me/account (D1 is Worker-owned). No session → sign-in. The
@@ -24,6 +25,7 @@ interface AccountData {
   displayName: string
   joinedAt: number
   providers: string[]
+  patron: PatronStorefront
 }
 
 // Network / 5xx → /maintenance inside fetchWorker. null here only means the
@@ -102,6 +104,9 @@ function SettingsBody({ data }: { data: AccountData }) {
           </Link>
         </CardContent>
       </Card>
+
+      {/* Patronage. */}
+      <PatronageCard initialPatron={data.patron} />
 
       {/* Session. */}
       <Card>

@@ -3,29 +3,40 @@
 // `wrangler secret put`. Re-run `wrangler types` whenever those change.
 //
 // This file augments that with secrets that may be UNSET at runtime — wrangler
-// can't infer them, but the code path still references them. Interface
-// merging on `Cloudflare.Env` is the Cloudflare-recommended pattern for this.
+// can't infer them, but the code path still references them.
+//
+// AUGMENTATION TARGET — must match what `wrangler types` actually emits.
+// Wrangler 4.93+ generates:
+//   interface __BaseEnv_Env { …all bindings… }
+//   declare namespace Cloudflare { interface Env extends __BaseEnv_Env {} }
+//   interface Env extends __BaseEnv_Env {}
+// The top-level `Env` is what `c.env` (Hono) and `this.env` (DO) resolve to,
+// and it extends `__BaseEnv_Env` directly — augmenting `Cloudflare.Env`
+// alone no longer reaches it. So we merge into the global `Env` directly.
 
 export {} // marks this file as a module so `declare global` works
 
 declare global {
-  namespace Cloudflare {
-    interface Env {
-      // Comma-separated origin allowlist. Used by both:
-      //   - the WS-upgrade Origin check (apps/game-server/src/origin.ts)
-      //   - Better Auth's trustedOrigins (apps/game-server/src/auth.ts)
-      // Unset in dev → permissive localhost + RFC 1918 matching.
-      // Set in production (`wrangler secret put ALLOWED_ORIGINS`).
-      ALLOWED_ORIGINS?: string
-      // Sentry DSN for the Worker (SKILL.md § 5). Optional — when unset
-      // (typical local dev) the Sentry SDK initializes in a disabled state
-      // and every capture call no-ops.
-      SENTRY_DSN_WORKER?: string
-      // R2 bucket for user-uploaded avatars (`[[r2_buckets]]` in
-      // wrangler.toml). Declared here rather than via `wrangler types`: the
-      // installed wrangler regenerates worker-configuration.d.ts in a newer
-      // format that no longer merges with this `Cloudflare.Env` augmentation.
-      AVATARS: R2Bucket
-    }
+  interface Env {
+    // Comma-separated origin allowlist. Used by both:
+    //   - the WS-upgrade Origin check (apps/game-server/src/origin.ts)
+    //   - Better Auth's trustedOrigins (apps/game-server/src/auth.ts)
+    // Unset in dev → permissive localhost + RFC 1918 matching.
+    // Set in production (`wrangler secret put ALLOWED_ORIGINS`).
+    ALLOWED_ORIGINS?: string
+    // Sentry DSN for the Worker (SKILL.md § 5). Optional — when unset
+    // (typical local dev) the Sentry SDK initializes in a disabled state
+    // and every capture call no-ops.
+    SENTRY_DSN_WORKER?: string
+    // Sentry release tag — typically the git SHA. Set at deploy time via
+    //   wrangler deploy --var SENTRY_RELEASE=$GIT_SHA
+    // Unset in local dev — Sentry just omits the tag from events.
+    SENTRY_RELEASE?: string
+    // R2 bucket for user-uploaded avatars (`[[r2_buckets]]` in
+    // wrangler.toml). Declared here rather than via `wrangler types`: the
+    // installed wrangler regenerates worker-configuration.d.ts in a newer
+    // format and AVATARS sometimes lands inline and sometimes doesn't,
+    // depending on the local SDK version. Belt-and-braces.
+    AVATARS: R2Bucket
   }
 }

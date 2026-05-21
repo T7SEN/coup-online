@@ -33,6 +33,16 @@ export interface ServerSeat {
   // Drives true finishing-position ranking for TrueSkill — see
   // computeFinishingPositions() in win-condition.ts.
   eliminationOrder: number | null
+  // Patron cosmetics — frozen at game-start from the WS-token claims, then
+  // copied through to PlayerSeat by buildPlayerView. Server-side is the
+  // authoritative source: a patron who clears their gilded toggle mid-game
+  // does NOT lose the gilded name in their current match. All optional so
+  // a GameState rehydrated from before Phase 4 still loads cleanly.
+  readonly isPatron?: boolean
+  readonly founderRank?: number | null
+  readonly gildedNickname?: boolean
+  readonly cardBackSkin?: string | null
+  readonly victoryFlourish?: boolean
 }
 
 // Re-export the BlockerCharacter type for convenience — pending-block uses it
@@ -77,4 +87,9 @@ export interface GameState {
   // of concluding the turn. Optional so a GameState rehydrated from before the
   // field existed reads as `undefined` (falsy = not pending).
   blockWindowPending?: boolean
+  // Host's table-theme key — captured at game start from the LobbyEntry of the
+  // hostPlayerId. Applied as the room's felt + ornament colours for every
+  // seat. null / absent = the standard green felt. Optional so a GameState
+  // rehydrated from before Phase 4 still loads cleanly.
+  tableTheme?: string | null
 }
