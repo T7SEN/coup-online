@@ -23,8 +23,17 @@ sections into a v2 checklist when the time comes.
 - **Public matchmaking** — `MatchmakingQueue` DO is a stub returning 501.
   Play hub shows "Coming in v2". SKILL.md § 3.4.
 - **Friends** — schema (`friend`, `friend_request`) is ready; no UI.
-- Renovate / Dependabot, CSP, Cloudflare edge hardening (HSTS, Bot Fight, WAF).
+- **Cloudflare edge hardening** (HSTS, Bot Fight, WAF managed rules) —
+  dashboard config; see § 8 for the walk-through. Recommended day-one but
+  not blocking.
 - ESLint 10 (blocked on `eslint-plugin-react@8` stable).
+
+**Shipped after the initial scope was written (no longer deferred):**
+- Content-Security-Policy header — production-only, locked-down
+  connect-src + strict frame-ancestors/object-src/base-uri/form-action. See
+  `apps/web/next.config.ts`.
+- Renovate dependency-update automation — config at `.github/renovate.json`.
+  Install instructions in § 9.
 
 ---
 
@@ -333,3 +342,132 @@ catch real-device issues. Required:
 - [ ] Weekly: free-tier usage check (Worker requests, D1 reads/writes, R2
       storage, Sentry error count, Resend send count). Confirm no surprise
       headroom problems before they become billing problems.
+
+---
+
+## 8. Cloudflare edge hardening (recommended day-one)
+
+Dashboard config only — no code. The header set in `next.config.ts`
+(nosniff, X-Frame-Options, Referrer-Policy, Permissions-Policy, CSP)
+covers the application layer; this section covers Cloudflare's edge so
+traffic is filtered before it reaches Vercel or the Worker.
+
+### 8a. HSTS — force HTTPS
+1. Cloudflare dashboard → **coups.app** → **SSL/TLS** → **Edge Certificates**
+2. **HTTP Strict Transport Security (HSTS)** → **Enable HSTS**
+3. Recommended initial settings:
+   - **Max-Age**: 6 months (180 days). Bump to 12 months after a week of no
+     issues. **Don't start at 12 months** — if something breaks you can't
+     unstick browsers that already cached the policy.
+   - **Apply HSTS policy to subdomains (includeSubDomains)**: ON (there are
+     no HTTP-only subdomains on coups.app today).
+   - **Preload**: OFF for now. Submitting to the HSTS Preload list is a
+     one-way door — removal takes months. Revisit after 6 months of stable
+     operation if you want it.
+   - **No-Sniff Header**: OFF (we already set X-Content-Type-Options at the
+     application layer in `next.config.ts`).
+4. Also enable: **SSL/TLS** → **Edge Certificates** → **Always Use HTTPS** (auto-redirects
+   http:// → https:// at the edge before HSTS can kick in for first-time visitors).
+5. Also confirm: **Minimum TLS Version** → **TLS 1.2** (1.0 and 1.1 are
+   deprecated since 2020 and have known weaknesses).
+
+### 8b. Bot Fight Mode
+1. Cloudflare dashboard → **coups.app** → **Security** → **Bots**
+2. **Bot Fight Mode** → **On**
+3. (Free tier only has Bot Fight Mode, not Super Bot Fight Mode — that's
+   Pro+ and not in v1 scope.)
+4. Watch Sentry / your inbox for the first week — Bot Fight Mode occasionally
+   challenges legitimate users on weird networks (corporate VPNs, mobile
+   carriers with shared IP pools, Tor). If you see a wave of "blocked from
+   coups.app" reports, flip it off and revisit.
+
+### 8c. WAF Managed Rules
+1. Cloudflare dashboard → **coups.app** → **Security** → **WAF** →
+   **Managed rules**
+2. Enable **Cloudflare Free Managed Ruleset** (the only one available on
+   Free; Pro adds OWASP Core + Cloudflare Specials).
+3. **Action**: **Managed Challenge** (presents a JS challenge to suspicious
+   requests; most users pass invisibly). Don't use "Block" outright — too
+   aggressive for a small site.
+4. **Sensitivity**: Medium (default). High will challenge too many
+   legitimate users.
+
+### 8d. Security Level (overall threat-blocking aggressiveness)
+1. **Security** → **Settings** → **Security Level**
+2. Leave at **Medium** (the default). High challenges too many normal
+   users; Low effectively turns off the feature.
+
+### 8e. Rate Limiting at the edge (skip on Free)
+Free tier includes a small rate-limiting allowance (10K requests / day
+across all rules) which is too tight to be useful for a real game. Our
+Worker already does per-user + per-endpoint rate limiting via the
+`RateLimitRegistry` DO — that's more granular than what Cloudflare edge
+rules could provide anyway. **Skip** unless you upgrade to Workers Paid
+later.
+
+### 8f. Browser Integrity Check
+1. **Security** → **Settings** → **Browser Integrity Check** → **ON**
+2. Blocks requests with no User-Agent or known-bad UA strings. Zero false
+   positive risk for normal users; catches the dumbest scrapers / curl
+   probing.
+
+### Verify all of the above
+After flipping these on, do one full sign-in + game session from an
+incognito window to confirm nothing's broken. Watch DevTools Network for any
+challenged requests; watch the Cloudflare **Security** → **Events** log for
+patterns. If a legitimate flow gets challenged repeatedly, dial back the
+specific rule that's tripping it.
+
+---
+
+## 9. Renovate setup (dependency PR automation)
+
+Config is already in the repo at `.github/renovate.json`. One-time install:
+
+1. Go to [github.com/apps/renovate](https://github.com/apps/renovate) →
+   **Install** (or **Configure** if already installed on another repo).
+2. **Repository access** → **Only select repositories** → pick
+   `T7SEN/coup-online`. (Don't grant org-wide access — Renovate runs whatever
+   config it finds, and a stray config in another repo could spam PRs.)
+3. Install. Renovate detects `.github/renovate.json` already exists and
+   skips the "onboarding PR" — it starts processing within a few minutes.
+
+### What the config does
+
+- **Weekly batch**: all updates open between 00:00–06:00 UTC every Monday.
+  No drip-feed of PRs through the week.
+- **Non-major grouping**: all `minor` + `patch` bumps land in **one** PR
+  titled "non-major dependencies". Easier to review than a wall of single-
+  dep PRs.
+- **Auto-merge after CI**: patch-only updates of `devDependencies`
+  auto-merge once the three gates pass. Production deps still need eyes-on
+  even for patches.
+- **`@cloudflare/workers-types` opt-out**: this dep publishes nearly-daily
+  date-stamped versions (`4.2026MMDD.N`). Bucketed into its own auto-merge
+  group so it doesn't flood the weekly digest.
+- **ESLint pin**: blocked at `<10.0.0` per launch-checklist § 0 — release
+  the pin only when `eslint-plugin-react@8` ships stable.
+- **Broad-surface deps tagged on major**: bumps to `better-auth`,
+  `@better-auth/passkey`, `drizzle-orm`, `drizzle-kit`, `next`,
+  `eslint-config-next`, `react`, `react-dom`, `hono`, `wrangler`,
+  `typescript`, `zod` get labelled `major-bump` + `needs-migration-plan`
+  per SKILL.md § 2 ("major bumps on broad-surface deps state as their own
+  task with a brief migration plan"). Never auto-merged.
+- **Security advisories**: bypass the weekly schedule (open immediately
+  when found). Labelled `security`. Never auto-merged — even a one-line
+  patch deserves a human read.
+- **Lockfile maintenance**: a weekly refresh PR that pulls in transitive-
+  dep updates not surfaced by the regular dep matchers.
+
+### How it interacts with the three gates
+Auto-merge respects branch protection rules. To make it work end-to-end,
+add a GitHub Actions workflow that runs the three gates on every PR (you
+likely already have this, but worth confirming). The auto-merge config uses
+`platformAutomerge: true` so the merge happens at the GitHub API layer once
+the required checks pass — Renovate doesn't poll or merge manually.
+
+### Maintenance
+Once installed, the only ongoing work is reviewing the weekly batched PR.
+For broad-surface major bumps that land with the `needs-migration-plan`
+label, treat as its own task per SKILL.md § 2 — open a draft, work through
+the migration, gate three times, then merge.

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommitTypeAll(chore)"
+  ],
+  "description": "Renovate keeps Coup Online's dependencies current. Weekly batched PRs, auto-merge for safe patches, manual review for broad-surface majors per SKILL.md § 2.",
+  "schedule": [
+    "* 0-6 * * 1"
+  ],
+  "timezone": "UTC",
+  "labels": [
+    "dependencies"
+  ],
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 8,
+  "rebaseWhen": "behind-base-branch",
+  "ignoreUnstable": true,
+  "packageRules": [
+    {
+      "description": "ESLint stays on 9.x until eslint-plugin-react@8 lands stable. v10 breaks via context.getFilename() removal.",
+      "matchPackageNames": [
+        "eslint",
+        "@eslint/js"
+      ],
+      "allowedVersions": "<10.0.0"
+    },
+    {
+      "description": "Group all non-major bumps into one weekly PR — less noise, easier review.",
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "non-major dependencies",
+      "groupSlug": "non-major-deps"
+    },
+    {
+      "description": "Auto-merge patch updates of dev dependencies after CI passes. Patch bumps on prod deps still need eyes-on.",
+      "matchDepTypes": [
+        "devDependencies"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Broad-surface deps need a migration plan on majors per SKILL.md § 2. Tag the PR so it doesn't auto-merge.",
+      "matchPackageNames": [
+        "better-auth",
+        "@better-auth/passkey",
+        "drizzle-orm",
+        "drizzle-kit",
+        "next",
+        "eslint-config-next",
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom",
+        "hono",
+        "wrangler",
+        "typescript",
+        "zod"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "labels": [
+        "dependencies",
+        "major-bump",
+        "needs-migration-plan"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Cloudflare workers-types is published almost daily as date-stamped versions. Batch separately so it doesn't dominate the weekly digest.",
+      "matchPackageNames": [
+        "@cloudflare/workers-types"
+      ],
+      "groupName": "@cloudflare/workers-types",
+      "groupSlug": "cloudflare-workers-types",
+      "schedule": [
+        "* 0-6 * * 1"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "description": "Security advisories bypass the weekly schedule. Don't auto-merge — a security PR deserves a human read even when the diff is small.",
+    "labels": [
+      "dependencies",
+      "security"
+    ],
+    "automerge": false,
+    "schedule": [
+      "at any time"
+    ]
+  },
+  "lockFileMaintenance": {
+    "description": "Periodically refresh the lockfile to pull in transitive-dep patches that don't trigger a top-level Renovate PR.",
+    "enabled": true,
+    "schedule": [
+      "* 0-6 * * 1"
+    ],
+    "commitMessageAction": "refresh"
+  }
+}

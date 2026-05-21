@@ -30,9 +30,70 @@ import type { NextConfig } from 'next'
 //   Permissions-Policy: deny everything we don't use. Future features can
 //   relax specific entries here.
 //
-// CSP is NOT set here — it's brittle to roll out without a per-page audit
-// of what scripts/styles/connects are needed. Document for a separate hardening
-// pass: `Content-Security-Policy` with self / hashed-inline-only.
+//   Content-Security-Policy (production only): production deploys ship a CSP
+//   that locks down where the page can load scripts, styles, images, fonts,
+//   and XHR/fetch/WebSocket connections from. The biggest practical wins for
+//   us are connect-src (data-exfiltration block — a malicious script can't
+//   POST stolen data to an attacker-controlled domain) and frame-ancestors
+//   (defense-in-depth on top of X-Frame-Options). `'unsafe-inline'` stays on
+//   script-src and style-src because moving to nonces requires per-request
+//   middleware (deferred to v2). Dev mode skips CSP entirely — Next.js's
+//   HMR injects inline scripts and uses eval(), which would either need
+//   'unsafe-eval' (don't want in production) or per-mode policies (extra
+//   complexity for little gain).
+const isProduction = process.env.NODE_ENV === 'production'
+
+// Worker origin — used as both connect-src HTTPS and wss:// WebSocket
+// source. Falls back to the local dev port for build-time consistency, but
+// since CSP is production-only the dev value is never actually emitted.
+const gameServerHttp =
+  process.env.NEXT_PUBLIC_GAME_SERVER_HTTP ?? 'http://127.0.0.1:8787'
+const gameServerWs = gameServerHttp.replace(/^http/, 'ws')
+
+const cspDirectives = [
+  "default-src 'self'",
+  // 'unsafe-inline' on script-src is the deliberate v1 tradeoff: Next.js
+  // emits a small inline hydration bootstrap. Nonces would close this but
+  // require middleware. Cloudflare Web Analytics is loaded from their CDN.
+  `script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com`,
+  // 'unsafe-inline' on style-src is unavoidable while using Tailwind v4 +
+  // shadcn — both emit inline styles for dynamic classes (CSS variables,
+  // ScrollArea sizing, etc.). Nonces don't help here even with middleware.
+  `style-src 'self' 'unsafe-inline'`,
+  // OAuth provider avatars come from many CDN subdomains (lh3.googleusercontent.com,
+  // cdn.discordapp.com, etc.). Allowing `https:` broadly is the pragmatic
+  // call — image src has minimal exfiltration value vs the maintenance cost
+  // of an enumerated allowlist. `blob:` and `data:` cover client-side
+  // previews (avatar / banner upload UI) and small inline SVGs.
+  `img-src 'self' blob: data: https:`,
+  // next/font self-hosts everything; `data:` covers a few small bundled
+  // base64-encoded fonts.
+  `font-src 'self' data:`,
+  // The high-value directive. Only allow XHR/fetch/WebSocket to: same
+  // origin (Next.js API routes + rewrites), the game-server Worker
+  // (HTTPS + WSS), Sentry's ingest endpoints (us + generic for region
+  // moves), and the Cloudflare Analytics beacon endpoint.
+  `connect-src 'self' ${gameServerHttp} ${gameServerWs} https://*.ingest.us.sentry.io https://*.ingest.sentry.io https://cloudflareinsights.com`,
+  // Clickjacking — strict 'none' on frame-ancestors complements the
+  // X-Frame-Options SAMEORIGIN header above (CSP wins when both are set in
+  // modern browsers; legacy clients honour X-Frame-Options).
+  "frame-ancestors 'none'",
+  // No third-party iframes — we don't embed payment widgets, video
+  // players, or social embeds.
+  "frame-src 'none'",
+  // No Flash, Java applets, etc.
+  "object-src 'none'",
+  // <base href> tampering — if XSS lands, a malicious <base> could
+  // hijack every relative link on the page. Lock to self.
+  "base-uri 'self'",
+  // <form action=""> targets — OAuth flows are GET-redirect-based, not
+  // form submissions, so 'self' suffices.
+  "form-action 'self'",
+  // Forces any accidental http:// resource to upgrade to https:// at the
+  // browser layer.
+  'upgrade-insecure-requests',
+].join('; ')
+
 const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
@@ -42,6 +103,9 @@ const securityHeaders = [
     value:
       'camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), interest-cohort=()',
   },
+  ...(isProduction
+    ? [{ key: 'Content-Security-Policy', value: cspDirectives }]
+    : []),
 ]
 
 const nextConfig: NextConfig = {
