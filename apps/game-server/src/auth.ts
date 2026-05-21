@@ -1,5 +1,8 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
+import { createAuthMiddleware } from 'better-auth/api'
+import { deleteSessionCookie } from 'better-auth/cookies'
+import { generateRandomString } from 'better-auth/crypto'
 import { magicLink } from 'better-auth/plugins/magic-link'
 import { twoFactor } from 'better-auth/plugins/two-factor'
 import { passkey } from '@better-auth/passkey'
@@ -214,9 +217,94 @@ export function createAuth(env: Env) {
       passkey({
         rpName: 'Coup Online',
         rpID: rpIdFromUrl(env.BETTER_AUTH_URL),
-        origin: env.BETTER_AUTH_URL.replace(/\/$/, ''),
+        // WebAuthn's `origin` MUST be the page origin (scheme + host[:port]) —
+        // no path. SimpleWebAuthn compares this against the browser's
+        // `clientDataJSON.origin` byte-for-byte; a trailing `/api/auth`
+        // breaks verification with FAILED_TO_VERIFY_REGISTRATION (500).
+        // `URL.origin` is the right accessor — `https://coups.app/api/auth`
+        // → `https://coups.app`.
+        origin: new URL(env.BETTER_AUTH_URL).origin,
       }),
     ],
+    // 2FA enforcement on OAuth + magic-link sign-ins. Better Auth's
+    // twoFactor plugin only hooks `/sign-in/email|username|phone-number`
+    // — see plugins/two-factor/index.mjs. Our users sign in exclusively
+    // via Google, Discord, and magic link, so without this hook the
+    // plugin is effectively dormant: enabling 2FA in /settings would
+    // never produce a challenge.
+    //
+    // The shape mirrors the plugin's own hook: read `newSession`, bail if
+    // 2FA isn't enabled for that user, otherwise tear down the freshly-
+    // issued session, set the partial `two_factor` cookie that the
+    // /two-factor/verify-* endpoints recognise, and redirect the browser
+    // to /auth/two-factor. The original callback URL flows through as
+    // `?next=` so the user lands where they expected after verification.
+    hooks: {
+      after: createAuthMiddleware(async (ctx) => {
+        // Only fire for the paths the plugin's built-in hook misses.
+        // Passkey sign-in (/passkey/verify-authentication) is intentionally
+        // NOT covered — passkeys are inherently multi-factor, so 2FA on top
+        // would be redundant.
+        const path = ctx.path
+        const isOAuthCallback = path.startsWith('/callback/')
+        const isMagicLinkVerify = path === '/magic-link/verify'
+        if (!isOAuthCallback && !isMagicLinkVerify) return
+
+        const data = ctx.context.newSession
+        if (!data?.user.twoFactorEnabled) return
+
+        // Drop the just-issued full session — the user hasn't proved the
+        // second factor yet, so it must not be usable.
+        deleteSessionCookie(ctx, true)
+        await ctx.context.internalAdapter.deleteSession(data.session.token)
+
+        // Issue the partial-session cookie the twoFactor plugin's verify
+        // endpoints expect. Same cookie name and verification-record shape
+        // it would create on /sign-in/email so the existing verifyTotp /
+        // verifyOtp / verifyBackupCode endpoints "just work".
+        const maxAge = 600
+        const twoFactorCookie = ctx.context.createAuthCookie(
+          'two_factor',
+          { maxAge },
+        )
+        const identifier = `2fa-${generateRandomString(20)}`
+        await ctx.context.internalAdapter.createVerificationValue({
+          value: data.user.id,
+          identifier,
+          expiresAt: new Date(Date.now() + maxAge * 1000),
+        })
+        await ctx.setSignedCookie(
+          twoFactorCookie.name,
+          identifier,
+          ctx.context.secret,
+          twoFactorCookie.attributes,
+        )
+
+        // Redirect to the 2FA challenge page. For OAuth, the original
+        // callbackURL the client passed to signIn.social is in the OAuth
+        // state — Better Auth surfaces it on the response when it would
+        // normally redirect. We can't easily extract it from our position
+        // in the hook, so we default to /auth/callback (which closes the
+        // popup and signals success) and let the page's `next` query
+        // override if present.
+        //
+        // The right way to redirect from a Better Auth after-hook is to
+        // `throw ctx.redirect(url)` — better-call's `redirect()` creates
+        // a 302 APIError with the Location header, and the after-hook
+        // framework's APIError catch translates that into the actual HTTP
+        // redirect response (overriding the OAuth callback's default
+        // redirect to the original callbackURL). Returning a raw
+        // `new Response(...)` does NOT work — the framework treats hook
+        // returns as `{ response, headers }` shape and silently drops
+        // anything else.
+        const base = new URL(env.BETTER_AUTH_URL).origin
+        const next = (typeof ctx.query?.callbackURL === 'string'
+          ? ctx.query.callbackURL
+          : '/auth/callback')
+        const redirectTo = `${base}/auth/two-factor?next=${encodeURIComponent(next)}`
+        throw ctx.redirect(redirectTo)
+      }),
+    },
   })
 }
 
