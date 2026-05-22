@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Fingerprint, MailCheck } from 'lucide-react'
 import { Logo } from '@/components/logo'
@@ -49,6 +49,38 @@ function SignInForm() {
       : null,
   )
   const [sent, setSent] = useState(false)
+
+  // Self-close on auth completion elsewhere. Two scenarios this catches:
+  //
+  //   1. Magic-link path: this popup shows "Check your inbox", user clicks
+  //      the link in their email (opens in a NEW tab — NOT this popup),
+  //      that new tab runs the OAuth callback → 2FA → /auth/callback,
+  //      /auth/callback broadcasts 'popup-done'. Without this listener the
+  //      popup is orphaned at the "Check your inbox" view forever.
+  //
+  //   2. Any case where the main window's useSignInPopup listener doesn't
+  //      fire (main window closed, navigated away, or refreshed since the
+  //      popup opened — popupRef would be cleared in those cases).
+  //
+  // `window.close()` is a no-op when the page wasn't opened by script
+  // (e.g., the user navigated to /auth/signin directly in a normal tab),
+  // so the listener is safe to mount unconditionally.
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null
+    try {
+      channel = new BroadcastChannel('coup-auth')
+      channel.onmessage = (e: MessageEvent) => {
+        if (e.data === 'popup-done') {
+          window.close()
+        }
+      }
+    } catch {
+      // No BroadcastChannel — fall back to the existing
+      // useSignInPopup-side close. Worst case: popup stays open and the
+      // user closes it manually.
+    }
+    return () => channel?.close()
+  }, [])
 
   async function handleSocial(provider: 'google' | 'discord') {
     setError(null)

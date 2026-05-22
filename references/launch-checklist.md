@@ -359,6 +359,39 @@ shared workers.dev zone, not yours — so WAF/Bot rules on coups.app don't
 filter WS traffic. (That's fine: the Worker enforces its own Origin
 allowlist + rate limiting on every upgrade.)
 
+**Prerequisite:** coups.app DNS must be on Cloudflare nameservers (NOT the
+registrar's default at name.com). See § 8-pre below if you haven't done
+the nameserver swap. Domain registration stays at name.com — only the
+nameservers change.
+
+**Menu navigation note (Cloudflare reorgs this dashboard yearly):** as of
+this writing the Security sidebar contains: Overview, Analytics, Events,
+WAF, Client-side security, Bots, API Shield, DDoS, Settings. Page Shield
+was renamed to "Client-side security." Page paths below reflect this
+layout — if Cloudflare reshuffles again, search by feature name (Ctrl+K
+in the dashboard) rather than the path.
+
+### 8-pre. DNS on Cloudflare (one-time)
+Required for everything else in § 8 to do anything. Domain registration
+stays at name.com (or wherever the domain is registered); only the
+nameservers move.
+
+1. [dash.cloudflare.com](https://dash.cloudflare.com) → **+ Add a site** →
+   `coups.app` → Free plan
+2. Cloudflare imports records from name.com's public DNS. Review:
+   - Apex A/AAAA/CNAME → Vercel (whatever name.com had)
+   - `www` CNAME → coups.app
+   - Any TXT records (Vercel domain verification, Google Search Console)
+3. Orange-cloud (proxy ON) the apex + www records. Grey-cloud TXT/MX.
+4. Copy the 2 nameservers Cloudflare assigns (e.g. `kara.ns.cloudflare.com`).
+5. At name.com → coups.app → **Nameservers** → replace with Cloudflare's two.
+   **Don't use name.com's "Transfer Domain" UI** — that's a registrar
+   transfer (blocked by ICANN's 60-day lock after recent changes). We're
+   only changing nameservers, which is unrestricted.
+6. Wait 5–60 min for propagation. Cloudflare status flips Pending → Active.
+7. Verify: `nslookup -type=NS coups.app` returns Cloudflare's nameservers,
+   and `curl -I https://coups.app` shows `server: cloudflare` + `cf-ray`.
+
 ### 8a. SSL/TLS → Overview
 - **SSL/TLS encryption mode**: **Full (strict)** — encrypts and validates
   Cloudflare↔Vercel. Other modes either skip encryption ("Flexible" —
@@ -403,30 +436,48 @@ allowlist + rate limiting on every upgrade.)
   rule for their pattern.
 
 ### 8e. Security → WAF
-- **Managed rules → Cloudflare Free Managed Ruleset**: **ON**
+WAF is its own sidebar item with tabs at the top (Managed rules, Custom
+rules, Rate limiting rules, Tools).
+- **Managed rules** tab → **Cloudflare Free Managed Ruleset** →
+  **Deploy** / **Enable**:
   - Action: **Managed Challenge** (JS challenge; most users pass invisibly)
   - Sensitivity: **Medium**
-- **Custom rules**: free tier allows 5. Optional adds:
+- **Custom rules** tab: free tier allows 5. Optional adds:
   - Block requests to `/api/*` with empty User-Agent
   - Managed Challenge bursts on `/api/auth/sign-in/*` when
     `cf.threat_score > 10`
   These are belt-and-braces on top of our Worker-side rate limiting + Better
   Auth's customRules. Skip if you'd rather keep slots free for future
   tuning.
-- **Rate limiting rules**: **skip on Free** (10K req/day across all rules
-  is too tight; our Worker `RateLimitRegistry` DO is more granular anyway)
+- **Rate limiting rules** tab: **skip on Free** (10K req/day across all
+  rules is too tight; our Worker `RateLimitRegistry` DO is more granular)
+- **Tools** tab (if present): User Agent Blocking, IP Access Rules. Both
+  free. Don't configure preemptively — use as reactive mitigation when you
+  spot abuse in Security → Events.
 
-### 8f. Security → Page Shield
-- **Page Shield**: **ON**
-- Free tier shows what scripts actually load on your pages —
-  complements the CSP in `next.config.ts` by giving observability into
-  what's running. Alerts/enforcement are Pro+; the visibility alone is
-  worth it.
+### 8f. Security → Client-side security (was "Page Shield")
+- **Client-side security** → **Settings** tab → toggle **ON**
+- The **Scripts** and **Connections** tabs give visibility into what runs
+  on your pages once traffic accrues — complements the CSP in
+  `next.config.ts` (CSP enforces blocks at the browser; this gives you
+  Cloudflare's edge-side view of what's loading).
+- Alerts / enforcement features are Pro+; the visibility alone is worth
+  the toggle on Free.
 
-### 8g. Security → DDoS Protection
-- **HTTP DDoS Attack Protection**: **ON**, sensitivity defaults are fine
-- L3/L4 DDoS is auto-on at the network layer — no config
+### 8g. Security → DDoS
+- **DDoS** is now its own top-level sidebar item (was buried under WAF
+  before the reorg).
+- **HTTP DDoS Attack Protection**: deploy if not auto-on, sensitivity
+  **High** (defaults are fine — Cloudflare's auto-mitigation is one of the
+  strongest things they ship)
+- **Network-layer DDoS Attack Protection**: auto-on, no config
 - Tune sensitivity only if you see false positives in Security → Events
+
+### 8g-skip. Security → API Shield
+- **Skip.** Cloudflare pushes it hard in 2026 but the useful features
+  (schema validation, abuse detection, sequence analysis) are paid. Free
+  tier shows you a list of detected endpoints, that's it. Our Worker
+  already Zod-validates every request at the boundary.
 
 ### 8h. Scrape Shield
 - **Email Address Obfuscation**: **ON** (auto-obscures emails in HTML to
