@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
@@ -325,8 +326,32 @@ export function HeroSection() {
           >
             Enter the court
           </Button>
+          {/* Explicit app description + legal links — present in the
+              static HTML (not just the footer) so OAuth-provider brand
+              reviewers and indexing crawlers can find them without
+              scrolling. The app-name string matches the OAuth consent
+              screen and the page metadata exactly: "Coup Online". */}
+          <p className="max-w-md text-xs text-muted-foreground">
+            <strong className="font-medium text-foreground">Coup Online</strong>{' '}
+            is a free, browser-based real-time adaptation of the Coup card
+            game for 3 to 6 players. No download, no ads, no tracking.
+          </p>
           <p className="text-xs text-muted-foreground">
-            Free to play — no download, just your browser.
+            By signing in, you agree to our{' '}
+            <Link
+              href="/terms"
+              className="underline-offset-4 hover:text-foreground hover:underline"
+            >
+              Terms
+            </Link>{' '}
+            and{' '}
+            <Link
+              href="/privacy"
+              className="underline-offset-4 hover:text-foreground hover:underline"
+            >
+              Privacy Policy
+            </Link>
+            .
           </p>
         </div>
       </div>
