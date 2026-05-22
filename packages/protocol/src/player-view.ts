@@ -69,9 +69,8 @@ export const PlayerView = z.object({
   myPlayerId: PlayerId,
   phase: Phase,
   turnPlayerId: PlayerId,
-  // TEMP(2-player testing): min lowered 3 → 2 so a 2-seat game's state-update
-  // passes validation. Revert to .min(3) before release (SKILL.md § 1).
-  seats: z.array(PlayerSeat).min(2).max(6),
+  // 3–6 seats per SKILL.md § 1 — Coup base game.
+  seats: z.array(PlayerSeat).min(3).max(6),
   courtDeck: z.object({ count: z.number().int().nonnegative() }),
   pendingAction: PendingAction.nullable(),
   pendingBlock: PendingBlock.nullable(),

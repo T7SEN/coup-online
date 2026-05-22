@@ -7,7 +7,14 @@ import { SupportContent } from './support-content'
 // points at the one thing anyone can do today — play. The design + entrance
 // animation live in the client SupportContent.
 
-export const metadata: Metadata = { title: 'Support — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+export const metadata: Metadata = pageMetadata({
+  title: 'Support',
+  description:
+    'Coup Online stays free for everyone. Become a patron to unlock cosmetic perks and a place in the Hall of Patrons.',
+  path: '/support',
+})
 
 export default function SupportPage() {
   return (

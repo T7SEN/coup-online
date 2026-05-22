@@ -1,6 +1,14 @@
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { getServerSession } from '@/lib/get-server-session'
+import { pageMetadata } from '@/lib/site-metadata'
 import { RoomClient } from './client'
+
+// Ephemeral live game state — never indexable.
+export const metadata: Metadata = pageMetadata({
+  title: 'Game room',
+  noindex: true,
+})
 
 // Server Component — reads the matchId param (async in Next 16), enforces
 // the auth gate, and hands off to the Client Component that owns the

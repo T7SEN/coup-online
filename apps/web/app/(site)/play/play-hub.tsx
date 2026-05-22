@@ -242,7 +242,7 @@ export function PlayHub() {
                 </h2>
                 <p className="text-sm text-muted-foreground">
                   Start a private table and share the code with 2&ndash;5
-                  friends.
+                  friends (3&ndash;6 players total).
                 </p>
               </div>
               <div className="mt-auto flex flex-col gap-2">

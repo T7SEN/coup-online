@@ -16,7 +16,14 @@ import { LeaderboardSearch } from './leaderboard-search'
 // the database itself. `force-dynamic` keeps it off the build-time prerender
 // path. The top three are showcased on a podium; the rest follow as a list.
 
-export const metadata: Metadata = { title: 'Leaderboard — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+export const metadata: Metadata = pageMetadata({
+  title: 'Leaderboard',
+  description:
+    'The top 100 ranked players on Coup Online, sorted by TrueSkill conservative rating (mu − 3·sigma). Updated after every match.',
+  path: '/leaderboard',
+})
 export const dynamic = 'force-dynamic'
 
 interface LeaderboardPlayer {

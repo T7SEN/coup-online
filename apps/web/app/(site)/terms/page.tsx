@@ -14,7 +14,14 @@ const RevealSection = dynamic(() =>
   import('@/components/site/reveal-section').then((m) => m.RevealSection),
 )
 
-export const metadata: Metadata = { title: 'Terms — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+export const metadata: Metadata = pageMetadata({
+  title: 'Terms',
+  description:
+    'Terms of use for Coup Online — fair play, account responsibilities, prohibited behaviour, and account anonymisation on deletion.',
+  path: '/terms',
+})
 
 // Bump whenever the terms change.
 const UPDATED = '19 May 2026'

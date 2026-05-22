@@ -3,10 +3,7 @@ import { DECK, drawFromDeck, randomIntBelow, shuffle } from './deck'
 import type { GameState, ServerSeat } from './state'
 
 // Minimum and maximum player count. SKILL.md § 1 — 3-6 players per match.
-// TEMP(2-player testing): MIN_PLAYERS lowered 3 → 2 for local testing so a
-// 2-player match can start. Revert to 3 before release —
-// grep "TEMP(2-player testing)" for every site that must move back.
-export const MIN_PLAYERS = 2
+export const MIN_PLAYERS = 3
 export const MAX_PLAYERS = 6
 
 // Starting resources per player. SKILL.md § 4.2.

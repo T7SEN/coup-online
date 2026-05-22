@@ -15,7 +15,14 @@ const RevealSection = dynamic(() =>
   import('@/components/site/reveal-section').then((m) => m.RevealSection),
 )
 
-export const metadata: Metadata = { title: 'Rules — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+export const metadata: Metadata = pageMetadata({
+  title: 'Rules',
+  description:
+    'The complete Coup rule set as we enforce it — 15-card deck, the seven actions, blocks, challenges, influence loss, mandatory Coup at 10 coins, win condition.',
+  path: '/rules',
+})
 
 // Shared hover treatment for the page's boxes + cards — a small lift, a
 // warmed border, and a shadow. Snaps (no transition) under reduced motion.

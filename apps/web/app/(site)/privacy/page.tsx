@@ -13,7 +13,14 @@ const RevealSection = dynamic(() =>
   import("@/components/site/reveal-section").then((m) => m.RevealSection),
 );
 
-export const metadata: Metadata = { title: "Privacy — Coup Online" };
+import { pageMetadata } from "@/lib/site-metadata";
+
+export const metadata: Metadata = pageMetadata({
+  title: "Privacy",
+  description:
+    "What Coup Online stores, why, and how long. We keep the minimum — no analytics on personal data, no ads, no third-party trackers.",
+  path: "/privacy",
+});
 
 // Bump whenever the notice changes.
 const UPDATED = "19 May 2026";

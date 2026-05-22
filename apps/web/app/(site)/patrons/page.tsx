@@ -9,7 +9,14 @@ import { HallContent } from './hall-content'
 // slots show the patron's name (and any vanity slug → /u/<slug>), unfilled
 // ones say "vacant". Server-rendered so it works pre-hydration.
 
-export const metadata: Metadata = { title: 'Hall of Patrons — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+export const metadata: Metadata = pageMetadata({
+  title: 'Hall of Patrons',
+  description:
+    'An honour roll of the people who keep Coup Online free and ad-free. Founders by inscription, supporters by date.',
+  path: '/patrons',
+})
 export const dynamic = 'force-dynamic'
 
 interface PatronEntry {

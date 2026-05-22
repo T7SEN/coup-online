@@ -83,7 +83,7 @@ describe('dealInitialState', () => {
     })
   }
 
-  // MIN_PLAYERS-relative so it survives the TEMP(2-player testing) change.
+  // MIN_PLAYERS-relative so the test follows any future change to the constant.
   it('rejects fewer than MIN_PLAYERS', () => {
     expect(() => dealInitialState('m1', makePlayers(MIN_PLAYERS - 1))).toThrow()
     expect(() => dealInitialState('m1', [])).toThrow()

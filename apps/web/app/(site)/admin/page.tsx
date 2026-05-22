@@ -16,7 +16,12 @@ import { AdminConsole } from './admin-content'
 // game-server/src/index.ts), so even a direct HTTP call to /api/admin/* is
 // denied to non-admins — defense in depth.
 
-export const metadata: Metadata = { title: 'Admin — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+export const metadata: Metadata = pageMetadata({
+  title: 'Admin',
+  noindex: true,
+})
 export const dynamic = 'force-dynamic'
 
 interface AdminStats {

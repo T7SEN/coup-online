@@ -5,7 +5,14 @@ import { AboutContent } from './about-content'
 // adapts. Static Server Component; the content + entrance animation live in
 // the client AboutContent.
 
-export const metadata: Metadata = { title: 'About — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+export const metadata: Metadata = pageMetadata({
+  title: 'About',
+  description:
+    'A real-time, fan-made web adaptation of Coup — built and paid for by a single student, for the love of it. Free for all, no ads, server-authoritative.',
+  path: '/about',
+})
 
 export default function AboutPage() {
   return (

@@ -9,7 +9,13 @@ import { MaintenanceContent } from './maintenance-content'
 // Server Component shell; the actual content + GSAP entrance + ambient
 // hourglass live in the client island below.
 
-export const metadata: Metadata = { title: 'In recess — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+// Status page — don't want this returned for normal search queries.
+export const metadata: Metadata = pageMetadata({
+  title: 'In recess',
+  noindex: true,
+})
 
 export default function MaintenancePage() {
   return (

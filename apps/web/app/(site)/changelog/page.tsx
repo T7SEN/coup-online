@@ -14,7 +14,14 @@ const RevealSection = dynamic(() =>
   import('@/components/site/reveal-section').then((m) => m.RevealSection),
 )
 
-export const metadata: Metadata = { title: 'Changelog — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+export const metadata: Metadata = pageMetadata({
+  title: 'Changelog',
+  description:
+    'Release notes for Coup Online — what shipped, what changed, and what is coming.',
+  path: '/changelog',
+})
 
 // Categories of change. Each gets a small gilded tag chip alongside the entry.
 type Tag = 'Added' | 'Refined' | 'Fixed'

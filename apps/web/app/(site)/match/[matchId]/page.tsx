@@ -17,7 +17,13 @@ import { cn, ordinal } from '@/lib/utils'
 // so a 403 (not a participant) and a 404 (no such match) are treated the same
 // here — `notFound()` — keeping a match's existence private to its players.
 
-export const metadata: Metadata = { title: 'Match result — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+// Match summaries are participant-only (SKILL.md § 3.6) — never indexable.
+export const metadata: Metadata = pageMetadata({
+  title: 'Match result',
+  noindex: true,
+})
 export const dynamic = 'force-dynamic'
 
 // Shared hover lift for the winner banner + standing rows.

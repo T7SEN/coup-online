@@ -21,7 +21,13 @@ import { HOVER } from '../../profile-sections'
 // /api/me/profile already returns; this page is the only consumer of the
 // dedicated /api/me/matches endpoint today.
 
-export const metadata: Metadata = { title: 'Match history — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+// Participant-only data — never indexable.
+export const metadata: Metadata = pageMetadata({
+  title: 'Match history',
+  noindex: true,
+})
 export const dynamic = 'force-dynamic'
 
 // The matches-list endpoint returns this shape.

@@ -18,7 +18,12 @@ import { TwoFactorCard } from './two-factor-card'
 // the profile page, so this only links there. The interactive bits — sign out,
 // delete account — are the client island in ./settings-actions.
 
-export const metadata: Metadata = { title: 'Settings — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+export const metadata: Metadata = pageMetadata({
+  title: 'Settings',
+  noindex: true,
+})
 export const dynamic = 'force-dynamic'
 
 interface AccountData {

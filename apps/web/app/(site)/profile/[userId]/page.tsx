@@ -23,7 +23,17 @@ import { HOVER, RatingTrendCard, SectionTitle, Stat } from '../profile-sections'
 // Otherwise the public /api/profile/:userId supplies the display data. D1 is
 // Worker-owned, so this page only ever talks to the Worker over HTTP.
 
-export const metadata: Metadata = { title: 'Profile — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+// Profile pages are noindex for now — they're user-generated and we don't
+// want PII (display names) showing up in search results without an explicit
+// opt-in. The leaderboard already exposes who's at the top; that's enough.
+// Could revisit with generateMetadata-per-user once we add a "public
+// profile" toggle in settings.
+export const metadata: Metadata = pageMetadata({
+  title: 'Profile',
+  noindex: true,
+})
 export const dynamic = 'force-dynamic'
 
 interface ProfileData {

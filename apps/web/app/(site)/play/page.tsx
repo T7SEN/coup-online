@@ -14,7 +14,14 @@ import { PlayHub } from './play-hub'
 // unreachable, `probeWorker` redirects to /maintenance immediately — better
 // than letting the visitor click "Create a table" and watch it fail silently.
 
-export const metadata: Metadata = { title: 'Play — Coup Online' }
+import { pageMetadata } from '@/lib/site-metadata'
+
+export const metadata: Metadata = pageMetadata({
+  title: 'Play',
+  description:
+    'Start a private 3 to 6 player Coup match or join one with a code. Free, browser-only, no install.',
+  path: '/play',
+})
 export const dynamic = 'force-dynamic'
 
 export default async function PlayPage() {
