@@ -244,11 +244,20 @@ export class GameRoom extends DurableObject<Env> {
     }
     if (state.lobbyPhase === 'IN_GAME' && state.game) {
       const seat = state.game.seats.find((s) => s.playerId === userId)
-      if (seat) seat.isDisconnected = true
-      // SKILL.md § 3.5 — 30 s forfeit deadline. computeAlarm() in afterMutation
-      // picks the earliest deadline across all disconnects + the phase timer.
-      state.disconnects[userId] = Date.now() + FORFEIT_MS
-      await this.afterMutation(state)
+      // Only schedule a forfeit if this disconnect is from an actual seated
+      // player. Spectators and non-participants can have WS connections too
+      // (anyone with the room code can open a socket) — their disconnects
+      // are no-ops, NOT forfeit triggers. Without this guard a spectator
+      // disconnect adds an orphan disconnects entry that later trips the
+      // alarm with IllegalActionError (Sentry issue 7504033325).
+      if (seat) {
+        seat.isDisconnected = true
+        // SKILL.md § 3.5 — 30 s forfeit deadline. computeAlarm() in
+        // afterMutation picks the earliest deadline across all disconnects
+        // + the phase timer.
+        state.disconnects[userId] = Date.now() + FORFEIT_MS
+        await this.afterMutation(state)
+      }
     }
   }
 
@@ -277,8 +286,32 @@ export class GameRoom extends DurableObject<Env> {
     // consistency. forfeitPlayer may flip phase to GAME_OVER mid-loop; that's
     // fine — subsequent forfeits still apply (revealing cards on already-dead
     // seats is a no-op).
+    //
+    // Defensive: skip entries whose playerId isn't actually seated in the
+    // current game. We've seen this happen in production (Sentry issue
+    // 7504033325) — disconnects ends up with an orphan entry, forfeitPlayer
+    // throws IllegalActionError("unknown_player"), the loop unwinds without
+    // clearing the entry, and every subsequent alarm fires the same error.
+    // The likely cause is a player who disconnected in the LOBBY phase
+    // before the game was dealt — they were never added to `state.game.seats`
+    // but their disconnects entry survived the LOBBY → IN_GAME transition.
+    // The defensive `seats.has(pid)` check both prevents the perpetual
+    // failure and reaps the orphan entry on the next alarm fire.
+    const seatedIds = new Set(state.game.seats.map((s) => s.playerId))
     for (const [pid, deadline] of Object.entries(state.disconnects)) {
       if (deadline > now) continue
+      if (!seatedIds.has(pid)) {
+        // Orphan entry — log once and reap. logger.warn so it shows up in
+        // Sentry Logs but doesn't open an issue.
+        logger.warn('orphan disconnect entry reaped from alarm', {
+          matchId: this.matchId,
+          playerId: pid,
+          deadline,
+        })
+        delete state.disconnects[pid]
+        mutated = true
+        continue
+      }
       forfeitPlayer(state.game, pid)
       delete state.disconnects[pid]
       mutated = true
