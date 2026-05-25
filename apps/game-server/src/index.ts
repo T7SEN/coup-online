@@ -430,16 +430,28 @@ const VANITY_CODE_RE = /^[A-Z0-9]{4,10}$/
 // could use to impersonate (`support`, `staff`). The list is intentionally
 // short — the right time to extend is when a specific impersonation
 // pattern actually shows up.
-// Validate that a path parameter is a `crypto.randomUUID()`-shaped UUID
-// before it touches D1 / R2. Belt-and-braces: Drizzle parameterises every
-// query (no SQL-injection path) and R2 keys are server-built, so this is
-// defence in depth — but it also protects against accidental misuse from
-// future code that might forward path params to log lines or build keys
-// without validation.
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-function isUuid(s: string): boolean {
-  return UUID_RE.test(s)
+// Validate that a path parameter looks like one of our user IDs before it
+// touches D1 / R2. Belt-and-braces: Drizzle parameterises every query (no
+// SQL-injection path) and R2 keys are server-built, so this is defence in
+// depth — but it also protects against accidental misuse from future code
+// that might forward path params to log lines or build keys without
+// validation.
+//
+// Two formats coexist:
+//   - `crypto.randomUUID()` — 36 chars, hyphenated hex. What the Drizzle
+//     `$defaultFn` on user.id would produce.
+//   - Better Auth's `generateId` — 32 chars, base62 (A-Z, a-z, 0-9). Better
+//     Auth supplies its own id in the insert payload, overriding the
+//     Drizzle default, so EVERY user created via Better Auth's sign-up /
+//     OAuth / magic-link / passkey flows lands with this shape.
+//
+// Rejecting Better Auth IDs as "not a UUID" 404'd every signed-in user's
+// profile and broke avatar / banner serves the same way. The regex below
+// accepts both, plus a length floor/ceiling so the validator still rules
+// out path traversal, query strings, and absurd inputs.
+const USER_ID_RE = /^[A-Za-z0-9-]{16,64}$/
+function isUserId(s: string): boolean {
+  return USER_ID_RE.test(s)
 }
 
 const RESERVED_SLUGS = new Set([
@@ -635,9 +647,12 @@ app.get('/api/leaderboard', async (c) => {
   const rows = await getLeaderboardTop100(db)
   return c.json({
     players: rows.map((r, i) => {
-      // `played` / `wins` are NULL for users with no matches (LEFT JOIN) —
-      // coalesce here. Win rate is left for the client to derive (played − wins
-      // gives losses), matching how the profile page computes it.
+      // After the `wins > 0` filter in getLeaderboardTop100, `played` and
+      // `wins` are always >= 1 for any row that comes back — but the
+      // `?? 0` coalesce stays as a belt-and-braces guard against future
+      // schema changes that might let NULL through.
+      // Win rate is left for the client to derive (played − wins gives
+      // losses), matching how the profile page computes it.
       const played = Number(r.played ?? 0)
       const wins = Number(r.wins ?? 0)
       return {
@@ -695,7 +710,7 @@ app.get('/api/players/search', async (c) => {
 app.get('/api/profile/:userId', async (c) => {
   const userId = c.req.param('userId')
   // Reject anything that isn't a UUID before it reaches the DB.
-  if (!isUuid(userId)) return c.json({ error: 'user_not_found' }, 404)
+  if (!isUserId(userId)) return c.json({ error: 'user_not_found' }, 404)
   const db = createDb(c.env.DB)
   const [me, ratingHistory, stats] = await Promise.all([
     getUserById(db, userId),
@@ -1107,7 +1122,7 @@ app.delete('/api/me/banner', async (c) => {
 // posture as the avatar serve route (see `nosniff` rationale there).
 app.get('/api/banners/:userId', async (c) => {
   const userId = c.req.param('userId')
-  if (!isUuid(userId)) return c.text('Not found', 404)
+  if (!isUserId(userId)) return c.text('Not found', 404)
   const obj = await c.env.AVATARS.get(`banners/${userId}`)
   if (!obj) {
     return c.text('Not found', 404)
@@ -1217,7 +1232,7 @@ app.delete('/api/me/account', async (c) => {
 //     class of attack.
 app.get('/api/avatars/:userId', async (c) => {
   const userId = c.req.param('userId')
-  if (!isUuid(userId)) return c.text('Not found', 404)
+  if (!isUserId(userId)) return c.text('Not found', 404)
   const obj = await c.env.AVATARS.get(`avatars/${userId}`)
   if (!obj) {
     return c.text('Not found', 404)
@@ -1342,7 +1357,7 @@ app.post('/api/admin/users/:userId/grant-patron', async (c) => {
   const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
   if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
   const targetId = c.req.param('userId')
-  if (!isUuid(targetId)) return c.json({ error: 'user_not_found' }, 404)
+  if (!isUserId(targetId)) return c.json({ error: 'user_not_found' }, 404)
   const db = createDb(c.env.DB)
   const target = await getUserById(db, targetId)
   if (!target) return c.json({ error: 'user_not_found' }, 404)
@@ -1382,7 +1397,7 @@ app.post('/api/admin/users/:userId/revoke-patron', async (c) => {
   const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
   if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
   const targetId = c.req.param('userId')
-  if (!isUuid(targetId)) return c.json({ error: 'user_not_found' }, 404)
+  if (!isUserId(targetId)) return c.json({ error: 'user_not_found' }, 404)
   const db = createDb(c.env.DB)
   const target = await getUserById(db, targetId)
   if (!target) return c.json({ error: 'user_not_found' }, 404)

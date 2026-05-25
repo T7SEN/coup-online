@@ -246,7 +246,7 @@ const db = createDb(env.DB)
 - `getUserMatchHistory(db, userId, limit?, offset?)` — joins match × match_player, ordered by `endedAt DESC`
 
 ### Leaderboard
-- `getLeaderboardTop100(db)` — selects `(mu − 3·sigma) AS rating`, orders by `rating DESC`, limit 100
+- `getLeaderboardTop100(db)` — selects `(mu − 3·sigma) AS rating`, orders by `rating DESC`, limit 100; INNER JOINs `match_player` aggregates and filters `wins > 0` (never-won users are hidden from the board until their first win)
 
 ### Rating graph
 - `getUserRatingHistory(db, userId, limit?)` — from `mmr_history` ordered newest-first

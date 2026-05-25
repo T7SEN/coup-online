@@ -254,9 +254,20 @@ export async function getUserMatchStats(db: Db, userId: string) {
 // ----------------------------------------------------------------------------
 
 export async function getLeaderboardTop100(db: Db) {
-  // Per-user match totals, aggregated over every match_player row. LEFT JOINed
-  // onto the rating-sorted user list so players with no matches still appear —
-  // their played / wins come back NULL, and the caller coalesces to 0.
+  // Per-user match totals, aggregated over every match_player row.
+  //
+  // Filter: a user has to have won at least one match to be ranked. Two
+  // reasons:
+  //   1. New sign-ups otherwise flood the board with the starting rating
+  //      (mu=25, sigma=25/3 → conservative 0). A leaderboard that's mostly
+  //      "people who clicked Sign in once" buries the actual players.
+  //   2. Profile pages for never-played users have almost nothing to show
+  //      (no match history, no rating trend). Surfacing them to strangers
+  //      via the leaderboard creates dead-end clicks.
+  //
+  // INNER JOIN drops users with zero match_player rows entirely; the
+  // `wins > 0` filter then drops users who've only ever lost. Win-rate-less
+  // players will reappear once they win their first match.
   const stats = db
     .select({
       userId: matchPlayers.userId,
@@ -285,7 +296,8 @@ export async function getLeaderboardTop100(db: Db) {
       wins: stats.wins,
     })
     .from(user)
-    .leftJoin(stats, eq(stats.userId, user.id))
+    .innerJoin(stats, eq(stats.userId, user.id))
+    .where(sql`${stats.wins} > 0`)
     .orderBy(sql`rating DESC`)
     .limit(100)
 }
