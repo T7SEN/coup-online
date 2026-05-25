@@ -501,6 +501,67 @@ export async function searchUsersForAdmin(db: Db, query: string, limit = 25) {
 }
 
 // ----------------------------------------------------------------------------
+// Season / leaderboard reset — admin-triggered factory reset of MMR state.
+// ----------------------------------------------------------------------------
+// Wipes every match, every match_player row, every mmr_history entry, and
+// resets each user's denormalized mu / sigma back to the TrueSkill defaults.
+// The user table itself (accounts, displayNames, patron flags, avatars) is
+// left untouched — only the "played a game" side of the world is rolled back.
+//
+// After this runs the leaderboard query (wins > 0 filter, see
+// getLeaderboardTop100) returns an empty list until somebody wins a match.
+//
+// Atomic via db.batch(): D1 either applies every statement or none.
+//
+// The default values are inlined rather than imported from @coup-online/rating
+// to avoid an inter-package dep just for two constants. Source of truth lives
+// in packages/rating/src/constants.ts (INITIAL_MU=25, INITIAL_SIGMA=25/3);
+// SKILL.md § 3.6 pins the same numbers.
+const RESET_MU = 25
+const RESET_SIGMA = 25 / 3
+
+export interface ResetMmrCounts {
+  readonly matches: number
+  readonly matchPlayers: number
+  readonly mmrHistory: number
+  readonly usersReset: number
+}
+
+export async function resetMmrAndMatches(db: Db): Promise<ResetMmrCounts> {
+  // Snapshot counts BEFORE the delete so the audit log can report exactly
+  // what disappeared. The user count is the row-count of the UPDATE rather
+  // than a destructive measure — it tells the admin "this reset touched N
+  // user rows" so they can sanity-check.
+  const [m, mp, mh, u] = await Promise.all([
+    db.select({ c: sql<number>`count(*)` }).from(matches),
+    db.select({ c: sql<number>`count(*)` }).from(matchPlayers),
+    db.select({ c: sql<number>`count(*)` }).from(mmrHistory),
+    db.select({ c: sql<number>`count(*)` }).from(user),
+  ])
+
+  // Order matters even with FK CASCADE: mmr_history first (references both
+  // user and match via informational FKs), then match_player (cascade-deletes
+  // when matches go but we delete explicitly so the count is honest), then
+  // matches, then reset every user's denormalized rating in place.
+  await db.batch([
+    db.delete(mmrHistory),
+    db.delete(matchPlayers),
+    db.delete(matches),
+    db.update(user).set({
+      mu: RESET_MU,
+      sigma: RESET_SIGMA,
+    }),
+  ])
+
+  return {
+    matches: Number(m[0]?.c ?? 0),
+    matchPlayers: Number(mp[0]?.c ?? 0),
+    mmrHistory: Number(mh[0]?.c ?? 0),
+    usersReset: Number(u[0]?.c ?? 0),
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Admin audit log — append-only history of admin-write actions.
 // ----------------------------------------------------------------------------
 // Inserts are called from the Worker right after each admin action succeeds;

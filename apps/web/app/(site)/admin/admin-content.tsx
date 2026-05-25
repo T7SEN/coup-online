@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   Crown,
   Loader2,
   RefreshCw,
+  RotateCcw,
   ScrollText,
   Search,
   Sparkles,
@@ -67,6 +69,10 @@ interface AdminAuditEntry {
 const FOUNDER_LIMIT = 10
 const SEARCH_DEBOUNCE_MS = 250
 const AUDIT_PAGE_SIZE = 25
+// How long the "Confirm reset" button stays live after the first click.
+// Long enough for a deliberate confirm, short enough that a forgotten armed
+// state can't be triggered by an accidental click minutes later.
+const REARM_TIMEOUT_MS = 4_000
 
 function isoDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10)
@@ -87,12 +93,16 @@ function auditTimestamp(ms: number): string {
 const ACTION_LABEL: Record<string, string> = {
   grant_patron: 'Granted patron',
   revoke_patron: 'Revoked patron',
+  reset_mmr: 'Reset MMR',
 }
 
 // Visual tone for each action — gold for grants, neutral for revokes, etc.
 const ACTION_TONE: Record<string, string> = {
   grant_patron: 'border-gold/55 bg-gold/10 text-gold',
   revoke_patron: 'border-border bg-muted text-muted-foreground',
+  // Reset MMR is destructive — same red palette as the destructive Button
+  // variant so it pops in the timeline.
+  reset_mmr: 'border-destructive/55 bg-destructive/10 text-destructive',
 }
 
 function StatTile({ label, value }: { label: string; value: string }) {
@@ -117,6 +127,12 @@ export function AdminConsole({
   const [searching, setSearching] = useState(false)
   const [pendingId, setPendingId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Reset MMR — two-step confirm. `armed` flips to true on the first click;
+  // a second click within REARM_TIMEOUT_MS actually fires. The countdown
+  // auto-disarms so the destructive button doesn't sit live forever.
+  const [resetArmed, setResetArmed] = useState(false)
+  const [resetPending, setResetPending] = useState(false)
+  const rearmTimeoutRef = useRef<number | null>(null)
   // Audit log — paginated, newest-first. Page size matches the Worker's
   // default (the Worker accepts ?limit=&offset= so we could request more,
   // but a 25-row page renders cleanly).
@@ -215,6 +231,67 @@ export function AdminConsole({
     }, SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(handle)
   }, [query])
+
+  // Arm / disarm the destructive reset button. First click arms (and starts
+  // an auto-disarm timer); second click within the window fires the reset.
+  // Cancel button (and tab-blur, unmount) clears the timer.
+  const armReset = useCallback(() => {
+    setResetArmed(true)
+    if (rearmTimeoutRef.current !== null) {
+      window.clearTimeout(rearmTimeoutRef.current)
+    }
+    rearmTimeoutRef.current = window.setTimeout(() => {
+      setResetArmed(false)
+      rearmTimeoutRef.current = null
+    }, REARM_TIMEOUT_MS)
+  }, [])
+
+  const disarmReset = useCallback(() => {
+    setResetArmed(false)
+    if (rearmTimeoutRef.current !== null) {
+      window.clearTimeout(rearmTimeoutRef.current)
+      rearmTimeoutRef.current = null
+    }
+  }, [])
+
+  // Clean up the auto-disarm timer on unmount so we don't setState into a
+  // dead component if the admin navigates away mid-arm.
+  useEffect(() => {
+    return () => {
+      if (rearmTimeoutRef.current !== null) {
+        window.clearTimeout(rearmTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Reset — wipes every match, match_player, mmr_history row, and resets
+  // every user's mu/sigma to the TrueSkill defaults. Server is idempotent;
+  // double-firing is harmless (second call returns counts of zero).
+  const runReset = useCallback(async () => {
+    disarmReset()
+    setResetPending(true)
+    try {
+      const res = await fetch('/api/admin/reset-mmr', {
+        method: 'POST',
+        cache: 'no-store',
+      })
+      if (!res.ok) throw new Error(`reset_failed_${res.status}`)
+      const counts = (await res.json()) as {
+        matches: number
+        matchPlayers: number
+        mmrHistory: number
+        usersReset: number
+      }
+      toast.success(
+        `MMR reset — cleared ${counts.matches} matches, ${counts.mmrHistory} history rows, reset ${counts.usersReset} users.`,
+      )
+      void loadAudit(0, true)
+    } catch {
+      toast.error("Couldn't reset MMR. Check the Worker logs.")
+    } finally {
+      setResetPending(false)
+    }
+  }, [disarmReset, loadAudit])
 
   // Action — grant or revoke. The Worker returns the updated patron block;
   // patch the user in-place rather than re-running the search.
@@ -566,6 +643,87 @@ export function AdminConsole({
           Patrons keeps the slot; re-granting later restores the patron
           without losing their founder position.
         </p>
+      </section>
+
+      {/* Danger zone — destructive admin tools. Visually walled off with a
+          red border + warning header so it can't be mistaken for routine
+          tooling. The reset button itself is two-step: first click arms,
+          second click within REARM_TIMEOUT_MS fires. Auto-disarms on a
+          countdown so a forgotten armed state can't be triggered later. */}
+      <section className="flex flex-col gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-4">
+        <div className="flex items-center gap-2">
+          <AlertTriangle
+            className="size-4 text-destructive"
+            aria-hidden
+          />
+          <h2 className="font-display text-lg tracking-wide text-destructive">
+            Danger zone
+          </h2>
+        </div>
+        <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Reset MMR</span>{' '}
+            wipes every match, every match-player row, and every rating-history
+            entry, then resets every user&rsquo;s rating back to{' '}
+            <code className="font-mono text-xs">μ=25, σ=25/3</code>. Patron
+            flags, display names, avatars, and account data are untouched.
+          </p>
+          <p className="text-xs">
+            Use this for a season rollover or to clear test data before
+            launch. Cannot be undone.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {!resetArmed ? (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={resetPending}
+              onClick={armReset}
+              className="shrink-0"
+            >
+              {resetPending ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+              ) : (
+                <RotateCcw className="mr-1.5 size-3.5" aria-hidden />
+              )}
+              Reset MMR
+            </Button>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={resetPending}
+                onClick={() => void runReset()}
+                className="shrink-0"
+                autoFocus
+              >
+                {resetPending ? (
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <AlertTriangle className="mr-1.5 size-3.5" aria-hidden />
+                )}
+                Confirm reset
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={resetPending}
+                onClick={disarmReset}
+                className="shrink-0"
+              >
+                Cancel
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Auto-cancels in {Math.round(REARM_TIMEOUT_MS / 1000)}s.
+              </span>
+            </>
+          )}
+        </div>
       </section>
     </div>
   )

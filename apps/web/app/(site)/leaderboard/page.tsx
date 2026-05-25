@@ -222,7 +222,7 @@ export default async function LeaderboardPage() {
         </h1>
         <OrnamentDivider className="w-44 max-w-[70%] text-gold/60" />
         <p className="text-sm text-muted-foreground">
-          The top 100 challengers, by conservative TrueSkill rating.
+          The top 100 challengers.
         </p>
       </header>
 

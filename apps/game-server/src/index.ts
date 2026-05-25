@@ -21,6 +21,7 @@ import {
   getUserRatingHistory,
   grantPatronage,
   isPatronSlugAvailable,
+  resetMmrAndMatches,
   revokePatronage,
   searchUsersByName,
   searchUsersForAdmin,
@@ -1422,6 +1423,38 @@ app.post('/api/admin/users/:userId/revoke-patron', async (c) => {
     founderRank: next?.founderRank ?? null,
     patronSince: next?.patronSince?.getTime() ?? null,
   })
+})
+
+// Season / leaderboard reset. Wipes every match, match_player, mmr_history
+// row, and resets every user's mu / sigma back to TrueSkill defaults
+// (25, 25/3). Patron flags, display names, avatars — anything that isn't
+// "played a game" state — are untouched.
+//
+// Confirmation lives entirely on the client (two-click confirm in
+// admin-content.tsx). The Worker has no idempotency token because the
+// operation IS idempotent — running it twice in a row on already-zeroed
+// state is a no-op (counts come back as zeros the second time).
+//
+// Sharing the `admin-write` rate-limit bucket means an admin still can't
+// trigger more than 60 admin-writes per minute total, even if they sit on
+// the reset button.
+app.post('/api/admin/reset-mmr', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  const db = createDb(c.env.DB)
+  const counts = await resetMmrAndMatches(db)
+  await insertAdminAudit(db, {
+    adminUserId: adminId,
+    action: 'reset_mmr',
+    // No target user — this is a global action. Payload carries the
+    // before-counts so the audit log row is self-describing ("wiped 142
+    // matches, 619 match_player rows, …").
+    targetUserId: null,
+    payload: JSON.stringify(counts),
+  })
+  return c.json(counts)
 })
 
 // WebSocket upgrade. Worker checks Origin (early reject of cross-origin

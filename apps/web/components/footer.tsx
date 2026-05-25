@@ -9,11 +9,18 @@ export function Footer() {
   return (
     <footer className="border-t border-gold/30">
       <p className="mx-auto max-w-5xl px-4 py-2.5 text-center text-xs text-muted-foreground">
-        Made With{" "}
-        <span role="img" aria-label="love">
-          💜
-        </span>{" "}
-        by T7SEN
+        {/* `whitespace-nowrap` keeps the byline as a single visual unit on
+            narrow viewports — without it phones break "by" off onto its own
+            line, separated from "T7SEN", which reads as an unfinished
+            sentence. The rest of the footer (links, version, year) is still
+            free to wrap. */}
+        <span className="whitespace-nowrap">
+          Made With{" "}
+          <span role="img" aria-label="love">
+            💜
+          </span>{" "}
+          by T7SEN
+        </span>
         <span aria-hidden="true" className="mx-1.5 text-muted-foreground/50">
           ·
         </span>
