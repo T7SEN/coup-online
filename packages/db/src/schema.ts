@@ -116,6 +116,16 @@ export const user = sqliteTable('user', {
   twoFactorEnabled: integer('twoFactorEnabled', { mode: 'boolean' })
     .notNull()
     .default(false),
+  // ----- Moderation. -----
+  // Admin-set suspension. When non-NULL the user is banned: the Worker
+  // refuses WebSocket upgrades and game-creating endpoints. Existing site
+  // browsing keeps working — the ban is per-action, not a session kill.
+  // Cleared by the admin /unban endpoint, which also nulls `banReason`.
+  bannedAt: integer('bannedAt', { mode: 'timestamp_ms' }),
+  // Free-form note shown in the admin UI (e.g. "spam in chat", "ToS
+  // violation"). Not surfaced to the banned user themselves — frontend
+  // only sees a generic "account suspended" message.
+  banReason: text('banReason'),
 }, (u) => ({
   // Vanity slug must be unique across users. SQLite treats every NULL in a
   // unique index as distinct, so unset slugs never collide.
@@ -467,6 +477,66 @@ export const adminAudit = sqliteTable(
 )
 
 // ============================================================================
+// Global app settings — single-row K/V for operational toggles.
+// ============================================================================
+// One row per key. v1 uses `key='maintenance'` to gate matchmaking + room
+// creates + WS upgrades, but the table is general-purpose so future toggles
+// (feature flags, kill switches, season config) can land without a migration.
+//
+// `value` is JSON-encoded — the caller parses according to the key's
+// expected shape. Each setting's payload type lives next to its query helper
+// in queries.ts, not here, so a new toggle doesn't require touching schema.
+
+export const appSettings = sqliteTable(
+  'app_settings',
+  {
+    key: text('key').primaryKey(),
+    value: text('value').notNull(),
+    updatedAt: integer('updatedAt', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    // Which admin made the last change. NULL only for rows created by
+    // automated bootstrap (none today). References user.id so a deleted
+    // admin's actions stay attributable via the audit log instead.
+    updatedBy: text('updatedBy').references(() => user.id),
+  },
+)
+
+// ============================================================================
+// Active-match registry — currently-in-progress games.
+// ============================================================================
+// Inserted by the GameRoom DO when a match transitions LOBBY → IN_GAME,
+// deleted when the DO finalizes GAME_OVER. The admin "Active matches" view
+// queries this to enumerate live DOs (Workers has no DO-enumeration API, so
+// without this table the only way to find an active game would be to know
+// its matchId in advance).
+//
+// Force-end works the same way as a normal end: the admin endpoint fetches
+// the DO stub for `matchId` and calls an internal route that flips phase to
+// GAME_OVER and removes the registry row. Stale rows (DO crashed without
+// cleanup) are rare and harmless — the admin can still force-end them,
+// which both ends the DO and clears the registry row.
+
+export const matchActive = sqliteTable(
+  'match_active',
+  {
+    matchId: text('matchId').primaryKey(),
+    startedAt: integer('startedAt', { mode: 'timestamp_ms' }).notNull(),
+    seatCount: integer('seatCount').notNull(),
+    // Who created the room. References user.id; if the host's account is
+    // deleted mid-game (admin nuking spammers) the FK is informational —
+    // SQLite doesn't enforce by default. The match keeps running.
+    hostUserId: text('hostUserId')
+      .notNull()
+      .references(() => user.id),
+  },
+  (m) => ({
+    // Most reads are "list active, newest first" — covered by startedAt.
+    startedAtIdx: index('match_active_started_at_idx').on(m.startedAt),
+  }),
+)
+
+// ============================================================================
 // Inferred row types — re-exported for consumers.
 // ============================================================================
 
@@ -492,6 +562,10 @@ export type AdminAudit = typeof adminAudit.$inferSelect
 export type NewAdminAudit = typeof adminAudit.$inferInsert
 export type TwoFactor = typeof twoFactor.$inferSelect
 export type NewTwoFactor = typeof twoFactor.$inferInsert
+export type AppSetting = typeof appSettings.$inferSelect
+export type NewAppSetting = typeof appSettings.$inferInsert
+export type MatchActive = typeof matchActive.$inferSelect
+export type NewMatchActive = typeof matchActive.$inferInsert
 export type RateLimit = typeof rateLimit.$inferSelect
 export type NewRateLimit = typeof rateLimit.$inferInsert
 export type Passkey = typeof passkey.$inferSelect

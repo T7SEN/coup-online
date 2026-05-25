@@ -2,12 +2,17 @@ import * as Sentry from '@sentry/cloudflare'
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import {
+  banUser,
+  clearUserIdentity,
   countUserPasskeys,
   createDb,
   deleteUserAccount,
+  getActiveMatches,
   getAdminAuditLog,
   getAdminStats,
+  getDbCounts,
   getFoundingPatrons,
+  getMaintenanceSetting,
   insertAdminAudit,
   getLeaderboardTop100,
   getMatchById,
@@ -25,6 +30,8 @@ import {
   revokePatronage,
   searchUsersByName,
   searchUsersForAdmin,
+  setMaintenanceSetting,
+  unbanUser,
   updatePatronSettings,
   updateUserDisplayName,
   updateUserImage,
@@ -301,6 +308,26 @@ app.onError((err, c) => {
 
 app.get('/health', (c) => c.json({ ok: true }))
 
+// Public site-status — Next.js layout calls this server-side on every nav
+// to know whether to render the maintenance banner. No auth: the maintenance
+// flag is public info (visitors WILL see the banner regardless). Short cache
+// is okay (60s) — admins toggling off won't see the banner clear for up to
+// a minute, which is acceptable for a low-frequency operational toggle.
+app.get('/api/site/status', async (c) => {
+  const db = createDb(c.env.DB)
+  const maintenance = await getMaintenanceSetting(db)
+  return c.json(
+    {
+      maintenance: {
+        enabled: maintenance.enabled,
+        message: maintenance.message,
+      },
+    },
+    200,
+    { 'Cache-Control': 'public, max-age=60' },
+  )
+})
+
 // Better Auth catch-all (better-auth.com/docs). Mounts Better Auth's internal
 // router under /api/auth/*. The browser hits these paths on the Vercel origin
 // (cookies stay there); Next.js's `rewrites` proxies the request here for the
@@ -338,6 +365,27 @@ app.post('/api/ws-token', async (c) => {
   const me = await getUserById(db, session.user.id)
   if (!me) {
     return c.json({ error: 'user_not_found' }, 404)
+  }
+  // Moderation gate — banned users can browse but cannot join games. We do
+  // the check here (the chokepoint for every WS connection) rather than at
+  // the WS upgrade itself: by the upgrade point the client is mid-handshake
+  // and a 4xx is awkward UX. A clean JSON 403 here lets the client show a
+  // "your account is suspended" toast on the room page.
+  if (me.bannedAt != null) {
+    return c.json({ error: 'account_suspended' }, 403)
+  }
+  // Maintenance gate — when the admin has flipped maintenance mode, the
+  // ws-token mint refuses for everyone except the admin themselves. Admins
+  // need access for smoke-testing the fix before unflipping.
+  const maintenance = await getMaintenanceSetting(db)
+  if (maintenance.enabled && !isAdminEmail(session.user.email)) {
+    return c.json(
+      {
+        error: 'maintenance',
+        message: maintenance.message || 'Coup Online is briefly offline for maintenance.',
+      },
+      503,
+    )
   }
   // `||` (not `??`) — Better Auth may persist `name` as an empty string for
   // magic-link signups. Empty-string would propagate into the JWT and show as
@@ -1296,9 +1344,16 @@ app.get('/api/admin/users', async (c) => {
       email: r.email,
       displayName: r.displayName?.trim() || r.name,
       image: r.image,
+      // Banner — for parity with the leaderboard / profile fallback chain,
+      // surfaced so admin "clear banner" can show the current state.
+      profileImage: r.profileImage,
       isPatron: r.isPatron,
       founderRank: r.founderRank,
       patronSince: r.patronSince?.getTime() ?? null,
+      // Ban state — drives the "Banned" pill + Ban/Unban label in the
+      // admin UI without a second round-trip per row.
+      bannedAt: r.bannedAt?.getTime() ?? null,
+      banReason: r.banReason,
       createdAt: r.createdAt.getTime(),
     })),
   })
@@ -1455,6 +1510,338 @@ app.post('/api/admin/reset-mmr', async (c) => {
     payload: JSON.stringify(counts),
   })
   return c.json(counts)
+})
+
+// Ban — flips `bannedAt` on the user row. The ws-token mint refuses banned
+// users (effectively kicking them from any future games while leaving site
+// browse working). Optional `reason` string is admin-only, never shown to
+// the banned user.
+app.post('/api/admin/users/:userId/ban', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  const targetId = c.req.param('userId')
+  if (!isUserId(targetId)) return c.json({ error: 'user_not_found' }, 404)
+  if (targetId === adminId) {
+    return c.json({ error: 'cannot_ban_self' }, 400)
+  }
+  const db = createDb(c.env.DB)
+  const target = await getUserById(db, targetId)
+  if (!target) return c.json({ error: 'user_not_found' }, 404)
+  // Defense in depth — refuse to ban another admin by email. Today the
+  // admin allowlist is a single email so this is moot, but keeps the
+  // invariant honest if the allowlist grows.
+  if (isAdminEmail(target.email)) {
+    return c.json({ error: 'cannot_ban_admin' }, 400)
+  }
+  let reason: string | null = null
+  try {
+    const body = (await c.req.json().catch(() => ({}))) as { reason?: unknown }
+    if (typeof body.reason === 'string') {
+      reason = body.reason.slice(0, 280).trim() || null
+    }
+  } catch {
+    // body parse failed — proceed with null reason
+  }
+  await banUser(db, targetId, reason)
+  await insertAdminAudit(db, {
+    adminUserId: adminId,
+    action: 'ban_user',
+    targetUserId: targetId,
+    payload: JSON.stringify({
+      reason,
+      wasAlreadyBanned: target.bannedAt != null,
+    }),
+  })
+  return c.json({ userId: targetId, bannedAt: Date.now(), banReason: reason })
+})
+
+app.post('/api/admin/users/:userId/unban', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  const targetId = c.req.param('userId')
+  if (!isUserId(targetId)) return c.json({ error: 'user_not_found' }, 404)
+  const db = createDb(c.env.DB)
+  const target = await getUserById(db, targetId)
+  if (!target) return c.json({ error: 'user_not_found' }, 404)
+  await unbanUser(db, targetId)
+  await insertAdminAudit(db, {
+    adminUserId: adminId,
+    action: 'unban_user',
+    targetUserId: targetId,
+    payload: JSON.stringify({
+      wasBanned: target.bannedAt != null,
+      previousReason: target.banReason,
+    }),
+  })
+  return c.json({ userId: targetId, bannedAt: null, banReason: null })
+})
+
+// Clear user-controlled identity bits — displayName, avatar, banner. Used
+// when a user has set an offensive nickname / uploaded inappropriate image.
+// R2 objects are deleted here (D1 nulling alone leaves the bytes orphaned).
+// Body shape: { displayName?: boolean, avatar?: boolean, banner?: boolean }.
+app.post('/api/admin/users/:userId/clear-identity', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  const targetId = c.req.param('userId')
+  if (!isUserId(targetId)) return c.json({ error: 'user_not_found' }, 404)
+  const db = createDb(c.env.DB)
+  const target = await getUserById(db, targetId)
+  if (!target) return c.json({ error: 'user_not_found' }, 404)
+  const body = (await c.req.json().catch(() => ({}))) as {
+    displayName?: unknown
+    avatar?: unknown
+    banner?: unknown
+  }
+  const opts = {
+    displayName: body.displayName === true,
+    avatar: body.avatar === true,
+    banner: body.banner === true,
+  }
+  if (!opts.displayName && !opts.avatar && !opts.banner) {
+    return c.json({ error: 'nothing_to_clear' }, 400)
+  }
+  await clearUserIdentity(db, targetId, opts)
+  // R2 cleanup — both stored under userId-keyed paths in the AVATARS bucket.
+  // Best-effort: deleting an already-absent object is a no-op for R2.
+  if (opts.avatar) {
+    await c.env.AVATARS.delete(`avatars/${targetId}`)
+  }
+  if (opts.banner) {
+    await c.env.AVATARS.delete(`banners/${targetId}`)
+  }
+  await insertAdminAudit(db, {
+    adminUserId: adminId,
+    action: 'clear_identity',
+    targetUserId: targetId,
+    payload: JSON.stringify({
+      cleared: opts,
+      previousDisplayName: target.displayName,
+      hadAvatar: target.image != null,
+      hadBanner: target.profileImage != null,
+    }),
+  })
+  return c.json({ userId: targetId, cleared: opts })
+})
+
+// Hard delete via the admin path. Reuses the same anonymise-and-purge that
+// the user-initiated /api/me/delete uses. Sentinel email matches that path
+// so identity collisions stay impossible. R2 cleanup runs here because the
+// db package doesn't own R2 bindings.
+app.post('/api/admin/users/:userId/delete', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  const targetId = c.req.param('userId')
+  if (!isUserId(targetId)) return c.json({ error: 'user_not_found' }, 404)
+  if (targetId === adminId) {
+    return c.json({ error: 'cannot_delete_self' }, 400)
+  }
+  const db = createDb(c.env.DB)
+  const target = await getUserById(db, targetId)
+  if (!target) return c.json({ error: 'user_not_found' }, 404)
+  if (isAdminEmail(target.email)) {
+    return c.json({ error: 'cannot_delete_admin' }, 400)
+  }
+  const anonEmail = `deleted-${targetId}@deleted.invalid`
+  await deleteUserAccount(db, targetId, anonEmail)
+  // R2 cleanup runs after the DB anonymise so a partial failure can be
+  // re-driven by re-calling delete (it stays idempotent for the R2 side).
+  await c.env.AVATARS.delete(`avatars/${targetId}`)
+  await c.env.AVATARS.delete(`banners/${targetId}`)
+  await insertAdminAudit(db, {
+    adminUserId: adminId,
+    action: 'delete_user',
+    targetUserId: targetId,
+    payload: JSON.stringify({
+      previousEmail: target.email,
+      previousDisplayName: target.displayName,
+      wasPatron: target.isPatron,
+      founderRankPreserved: target.founderRank,
+    }),
+  })
+  return c.json({ userId: targetId, ok: true })
+})
+
+// Live games — admin "active matches" panel. Reads the match_active table
+// (written by the GameRoom DO on game start, removed on game end). Cheap
+// query (free tier rarely has more than a handful of simultaneous matches).
+app.get('/api/admin/active-matches', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const db = createDb(c.env.DB)
+  const rows = await getActiveMatches(db, 100)
+  return c.json({
+    matches: rows.map((r) => ({
+      matchId: r.matchId,
+      startedAt: r.startedAt.getTime(),
+      seatCount: r.seatCount,
+      hostUserId: r.hostUserId,
+      // displayName fallback chain mirrors the rest of the app — project
+      // nickname > provider name > "Player".
+      hostDisplayName:
+        r.hostDisplayName?.trim() || r.hostName || 'Player',
+    })),
+  })
+})
+
+// Force-end a live match. Fetches the GameRoom DO stub for the matchId and
+// asks it to close. The DO closes every WS with CLOSE_ROOM_CLOSED, clears
+// its alarm, and removes itself from match_active. NOT counted as a played
+// match — TrueSkill / MMR / match history are untouched.
+app.post('/api/admin/matches/:matchId/end', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  const matchId = c.req.param('matchId')
+  // matchIds are crypto.randomUUID() per SKILL.md § 5 — same UUID-or-nanoid
+  // validator covers them.
+  if (!isUserId(matchId)) return c.json({ error: 'match_not_found' }, 404)
+  const id = c.env.GAME_ROOM.idFromName(matchId)
+  const stub = c.env.GAME_ROOM.get(id)
+  let stubResult: { ok?: boolean; note?: string } = {}
+  try {
+    const res = await stub.fetch(
+      // URL doesn't matter — DO matches on the header. Path is decorative
+      // so it lands clearly in any future log line.
+      new Request('https://do.local/__admin/force-end', {
+        method: 'POST',
+        headers: { 'X-Internal-Action': 'force-end' },
+      }),
+    )
+    if (res.ok) {
+      stubResult = (await res.json()) as { ok?: boolean; note?: string }
+    } else {
+      logger.warn('force-end DO returned non-OK', {
+        matchId,
+        status: res.status,
+      })
+    }
+  } catch (err) {
+    logger.error('force-end DO call failed', err, { matchId })
+  }
+  const db = createDb(c.env.DB)
+  await insertAdminAudit(db, {
+    adminUserId: adminId,
+    action: 'force_end_match',
+    // No targetUserId — the subject is a match, not a user. The matchId
+    // lives in the payload for searchability.
+    targetUserId: null,
+    payload: JSON.stringify({ matchId, stubResult }),
+  })
+  return c.json({ matchId, ok: true })
+})
+
+// Free-tier quota strip. D1 row counts are cheap; R2 stats need an iterated
+// list() call (R2 binding isn't reachable from packages/db, so the iteration
+// lives here). DO invocation counts aren't exposed to the runtime — link
+// out to the Cloudflare dashboard for those instead of faking them.
+//
+// R2 enumeration: list with a hard ceiling so a runaway bucket can't make
+// this endpoint slow. The ceiling shows up in the response as `truncated`
+// so the UI can hint at it.
+const R2_LIST_CEILING = 5_000
+app.get('/api/admin/quota', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const db = createDb(c.env.DB)
+  const counts = await getDbCounts(db)
+  // R2 totals — paginated list() with a ceiling. Avatars + banners share
+  // the AVATARS bucket; we split by key prefix to show each separately.
+  async function summarizePrefix(prefix: string): Promise<{
+    objects: number
+    bytes: number
+    truncated: boolean
+  }> {
+    let cursor: string | undefined = undefined
+    let objects = 0
+    let bytes = 0
+    let truncated = false
+    while (objects < R2_LIST_CEILING) {
+      const page: R2Objects = await c.env.AVATARS.list({
+        prefix,
+        cursor,
+        limit: 1000,
+      })
+      for (const obj of page.objects) {
+        objects += 1
+        bytes += obj.size
+      }
+      if (!page.truncated) break
+      // R2Objects.truncated being true means there are more pages; cursor
+      // is non-null in that case (R2 type narrows it as we go).
+      cursor = page.cursor
+      if (objects >= R2_LIST_CEILING) {
+        truncated = true
+        break
+      }
+    }
+    return { objects, bytes, truncated }
+  }
+  const [avatars, banners] = await Promise.all([
+    summarizePrefix('avatars/'),
+    summarizePrefix('banners/'),
+  ])
+  return c.json({
+    d1: counts,
+    r2: {
+      avatars,
+      banners,
+      ceiling: R2_LIST_CEILING,
+    },
+  })
+})
+
+// Maintenance mode — GET shows current setting (admin-only; the public
+// /api/site/status endpoint above is the version the layout fetches).
+app.get('/api/admin/maintenance', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const db = createDb(c.env.DB)
+  const setting = await getMaintenanceSetting(db)
+  return c.json({
+    enabled: setting.enabled,
+    message: setting.message,
+    updatedAt: setting.updatedAt?.getTime() ?? null,
+  })
+})
+
+app.post('/api/admin/maintenance', async (c) => {
+  const adminId = await checkAdmin(c)
+  if (!adminId) return c.json({ error: 'not_found' }, 404)
+  const rate = await checkRateLimit(c.env, adminId, 'admin-write', 60, 60_000)
+  if (!rate.ok) return rateLimitResponse(c, rate.retryAfterMs)
+  const body = (await c.req.json().catch(() => ({}))) as {
+    enabled?: unknown
+    message?: unknown
+  }
+  const enabled = body.enabled === true
+  // Cap the message so the banner stays one line and SQL doesn't grow
+  // unbounded.
+  const rawMessage = typeof body.message === 'string' ? body.message : ''
+  const message = rawMessage.slice(0, 240).trim()
+  const db = createDb(c.env.DB)
+  const previous = await getMaintenanceSetting(db)
+  await setMaintenanceSetting(db, { enabled, message, updatedBy: adminId })
+  await insertAdminAudit(db, {
+    adminUserId: adminId,
+    action: 'set_maintenance',
+    targetUserId: null,
+    payload: JSON.stringify({
+      enabled,
+      message,
+      previousEnabled: previous.enabled,
+    }),
+  })
+  return c.json({ enabled, message })
 })
 
 // WebSocket upgrade. Worker checks Origin (early reject of cross-origin

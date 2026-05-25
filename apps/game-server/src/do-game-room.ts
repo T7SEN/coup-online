@@ -23,6 +23,11 @@ import {
   IllegalActionError,
   type GameState,
 } from '@coup-online/game-logic'
+import {
+  createDb,
+  deregisterActiveMatch,
+  registerActiveMatch,
+} from '@coup-online/db'
 import { verifyJwt, type JwtClaims } from './auth'
 import { persistMatchResult } from './db-helpers'
 import { logger } from './logger'
@@ -52,6 +57,9 @@ const CLOSE_INVALID_TOKEN = 4001 // SKILL.md § 5
 const CLOSE_MATCH_FULL = 4002
 const CLOSE_MATCH_IN_PROGRESS = 4003
 const CLOSE_KICKED = 4004
+// Admin force-end. Clients show "this room was closed by an admin" and
+// don't auto-reconnect (the DO returns the same 4005 on rejoin).
+const CLOSE_ROOM_CLOSED = 4005
 
 interface LobbyEntry {
   readonly playerId: string
@@ -119,6 +127,14 @@ export class GameRoom extends DurableObject<Env> {
   // Upgrade — SKILL.md § 5 (Origin allowlist + JWT verify + Hibernation accept)
   // ==========================================================================
   async fetch(request: Request): Promise<Response> {
+    // Internal admin force-end. Reachable only by the Worker (DO binding-only
+    // access — no public route maps here). The Worker's /api/admin/matches/
+    // :matchId/end gates on `checkAdmin` before fetching the stub, so the DO
+    // can trust this path. URL doesn't matter — we match by header.
+    if (request.headers.get('X-Internal-Action') === 'force-end') {
+      return await this.handleAdminForceEnd()
+    }
+
     if (request.headers.get('upgrade') !== 'websocket') {
       return new Response('Upgrade Required', { status: 426 })
     }
@@ -497,6 +513,22 @@ export class GameRoom extends DurableObject<Env> {
       })
       state.lobbyPhase = 'IN_GAME'
       state.startedAt = Date.now()
+      // Active-match registry — lets the admin "Live games" panel enumerate
+      // running DOs. Best-effort: a D1 hiccup here mustn't prevent the game
+      // from starting. The admin worst case is "stuck-DO recovery costs a
+      // redeploy instead of one button click."
+      try {
+        await registerActiveMatch(createDb(this.env.DB), {
+          matchId: this.matchId,
+          startedAt: new Date(state.startedAt),
+          seatCount: state.lobby.length,
+          hostUserId: state.hostPlayerId,
+        })
+      } catch (err) {
+        logger.error('registerActiveMatch failed', err, {
+          matchId: this.matchId,
+        })
+      }
       await this.afterMutation(state)
       return
     }
@@ -674,6 +706,71 @@ export class GameRoom extends DurableObject<Env> {
         logger.error('persistMatchResult failed', err, { matchId: this.matchId })
       }
     }
+    // Active-match registry cleanup runs regardless of persistMatchResult
+    // outcome — a failed MMR write shouldn't leave a stale "live" row.
+    try {
+      await deregisterActiveMatch(createDb(this.env.DB), this.matchId)
+    } catch (err) {
+      logger.error('deregisterActiveMatch failed', err, {
+        matchId: this.matchId,
+      })
+    }
+  }
+
+  // Admin force-end. Marks the room GAME_OVER, closes every socket with
+  // CLOSE_ROOM_CLOSED, clears the active-match registry, and skips
+  // persistMatchResult (an admin abort is NOT a counted match — no winner
+  // exists for TrueSkill purposes). Idempotent on already-ended rooms.
+  private async handleAdminForceEnd(): Promise<Response> {
+    const state = await this.loadState()
+    if (state == null) {
+      // Never-initialized DO (no LOBBY ever existed for this matchId).
+      // Still clear the registry — a stale row could exist in pathological
+      // restore scenarios — and return ok.
+      try {
+        await deregisterActiveMatch(createDb(this.env.DB), this.matchId)
+      } catch (err) {
+        logger.error('deregisterActiveMatch failed in force-end (null state)', err, {
+          matchId: this.matchId,
+        })
+      }
+      return new Response(
+        JSON.stringify({ ok: true, matchId: this.matchId, note: 'no_state' }),
+        { headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+    if (state.lobbyPhase !== 'GAME_OVER') {
+      state.lobbyPhase = 'GAME_OVER'
+      if (state.game) state.game.timerEndsAt = null
+      if (state.endedAt == null) state.endedAt = Date.now()
+      state.disconnects = {}
+      await this.ctx.storage.deleteAlarm()
+      await this.saveState(state)
+    }
+    // Close every connected socket. Wrapped per-ws so one already-dead
+    // socket doesn't block the rest from closing.
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(CLOSE_ROOM_CLOSED, 'Room closed by admin')
+      } catch (err) {
+        logger.warn('force-end ws close failed', {
+          matchId: this.matchId,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+    // Always-attempt registry cleanup. Idempotent.
+    try {
+      await deregisterActiveMatch(createDb(this.env.DB), this.matchId)
+    } catch (err) {
+      logger.error('deregisterActiveMatch failed in force-end', err, {
+        matchId: this.matchId,
+      })
+    }
+    return new Response(
+      JSON.stringify({ ok: true, matchId: this.matchId }),
+      { headers: { 'Content-Type': 'application/json' } },
+    )
   }
 
   private async scheduleAlarm(state: PersistedState): Promise<void> {

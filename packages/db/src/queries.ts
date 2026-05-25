@@ -4,8 +4,10 @@ import { alias } from 'drizzle-orm/sqlite-core'
 import {
   account,
   adminAudit,
+  appSettings,
   friendRequests,
   friends,
+  matchActive,
   matchPlayers,
   matches,
   mmrHistory,
@@ -483,9 +485,12 @@ export async function searchUsersForAdmin(db: Db, query: string, limit = 25) {
       displayName: user.displayName,
       name: user.name,
       image: user.image,
+      profileImage: user.profileImage,
       isPatron: user.isPatron,
       patronSince: user.patronSince,
       founderRank: user.founderRank,
+      bannedAt: user.bannedAt,
+      banReason: user.banReason,
       createdAt: user.createdAt,
     })
     .from(user)
@@ -498,6 +503,240 @@ export async function searchUsersForAdmin(db: Db, query: string, limit = 25) {
     )
     .orderBy(desc(user.createdAt))
     .limit(limit)
+}
+
+// ----------------------------------------------------------------------------
+// Moderation — ban / unban + identity clears.
+// ----------------------------------------------------------------------------
+
+// Ban a user. Stamps `bannedAt` and stores the admin-provided reason; the
+// Worker checks `bannedAt IS NOT NULL` at every game-creating chokepoint
+// (WS upgrade, ws-token mint, future matchmaking) and refuses. Idempotent —
+// rebanning a banned user just refreshes `bannedAt` and overrides the reason.
+export async function banUser(db: Db, userId: string, reason: string | null) {
+  await db
+    .update(user)
+    .set({
+      bannedAt: new Date(),
+      banReason: reason ?? null,
+    })
+    .where(eq(user.id, userId))
+}
+
+export async function unbanUser(db: Db, userId: string) {
+  await db
+    .update(user)
+    .set({ bannedAt: null, banReason: null })
+    .where(eq(user.id, userId))
+}
+
+// Quick ban check for hot paths. Returns true if the user row exists AND
+// `bannedAt` is set. Unknown user IDs return false (treat as not-banned;
+// the caller's session/auth gate handles "no such user" upstream).
+export async function isUserBanned(db: Db, userId: string): Promise<boolean> {
+  const rows = await db
+    .select({ bannedAt: user.bannedAt })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1)
+  return rows[0]?.bannedAt != null
+}
+
+// Admin "scrub" — null out user-controlled identity fields without deleting
+// the account. Each flag is independent so the caller can clear just the
+// displayName (offensive nickname) without also wiping the avatar. R2
+// deletes for avatar / banner live in the Worker — this only touches D1.
+//
+// `displayName` reset → NULL: the leaderboard / profile fallback chain
+// renders `user.name` (the provider's name) instead. The user can pick a
+// new one via the Settings page exactly as on first sign-in.
+export interface ClearIdentityOpts {
+  readonly displayName?: boolean
+  readonly avatar?: boolean
+  readonly banner?: boolean
+}
+
+export async function clearUserIdentity(
+  db: Db,
+  userId: string,
+  opts: ClearIdentityOpts,
+) {
+  const patch: Partial<typeof user.$inferInsert> = {}
+  if (opts.displayName) patch.displayName = null
+  if (opts.avatar) patch.image = null
+  if (opts.banner) patch.profileImage = null
+  if (Object.keys(patch).length === 0) return
+  await db.update(user).set(patch).where(eq(user.id, userId))
+}
+
+// ----------------------------------------------------------------------------
+// Active-match registry — written by the GameRoom DO, read by admin.
+// ----------------------------------------------------------------------------
+
+// Called by the GameRoom DO on LOBBY → IN_GAME. Idempotent via INSERT OR
+// REPLACE: if a stale row exists for the same matchId (e.g. a crashed DO
+// that never deregistered), the new game's start overwrites it.
+export async function registerActiveMatch(
+  db: Db,
+  args: {
+    readonly matchId: string
+    readonly startedAt: Date
+    readonly seatCount: number
+    readonly hostUserId: string
+  },
+) {
+  await db
+    .insert(matchActive)
+    .values({
+      matchId: args.matchId,
+      startedAt: args.startedAt,
+      seatCount: args.seatCount,
+      hostUserId: args.hostUserId,
+    })
+    .onConflictDoUpdate({
+      target: matchActive.matchId,
+      set: {
+        startedAt: args.startedAt,
+        seatCount: args.seatCount,
+        hostUserId: args.hostUserId,
+      },
+    })
+}
+
+// Called by the GameRoom DO on game-end (normal or force-end). Idempotent —
+// deleting an already-absent row is a no-op.
+export async function deregisterActiveMatch(db: Db, matchId: string) {
+  await db.delete(matchActive).where(eq(matchActive.matchId, matchId))
+}
+
+// Active-match list for the admin "Live games" panel. Joined with the host
+// user so the UI can show "hosted by Alice" without a second round-trip.
+// Newest first; limit is a soft cap (free tier rarely has >20 simultaneous
+// games today).
+export async function getActiveMatches(db: Db, limit = 50) {
+  return db
+    .select({
+      matchId: matchActive.matchId,
+      startedAt: matchActive.startedAt,
+      seatCount: matchActive.seatCount,
+      hostUserId: matchActive.hostUserId,
+      hostDisplayName: user.displayName,
+      hostName: user.name,
+    })
+    .from(matchActive)
+    .leftJoin(user, eq(user.id, matchActive.hostUserId))
+    .orderBy(desc(matchActive.startedAt))
+    .limit(limit)
+}
+
+// ----------------------------------------------------------------------------
+// Global app settings — single-key reads + writes for operational toggles.
+// ----------------------------------------------------------------------------
+
+// Maintenance mode shape. `enabled = true` → Worker refuses game-creating
+// endpoints AND the Next.js layout shows a banner / redirects to /maintenance
+// per the layout logic. `message` is the admin-supplied note rendered in the
+// banner; empty string = banner shows a default copy.
+export interface MaintenanceSetting {
+  readonly enabled: boolean
+  readonly message: string
+}
+
+const MAINTENANCE_KEY = 'maintenance'
+
+export async function getMaintenanceSetting(
+  db: Db,
+): Promise<MaintenanceSetting & { updatedAt: Date | null }> {
+  const rows = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, MAINTENANCE_KEY))
+    .limit(1)
+  const row = rows[0]
+  if (!row) {
+    return { enabled: false, message: '', updatedAt: null }
+  }
+  try {
+    const parsed = JSON.parse(row.value) as Partial<MaintenanceSetting>
+    return {
+      enabled: parsed.enabled === true,
+      message: typeof parsed.message === 'string' ? parsed.message : '',
+      updatedAt: row.updatedAt,
+    }
+  } catch {
+    // Corrupt payload — treat as off rather than crashing the read. The
+    // admin can re-set the value via the UI to recover.
+    return { enabled: false, message: '', updatedAt: row.updatedAt }
+  }
+}
+
+export async function setMaintenanceSetting(
+  db: Db,
+  args: {
+    readonly enabled: boolean
+    readonly message: string
+    readonly updatedBy: string
+  },
+) {
+  const value = JSON.stringify({
+    enabled: args.enabled,
+    message: args.message,
+  } satisfies MaintenanceSetting)
+  await db
+    .insert(appSettings)
+    .values({
+      key: MAINTENANCE_KEY,
+      value,
+      updatedAt: new Date(),
+      updatedBy: args.updatedBy,
+    })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: {
+        value,
+        updatedAt: new Date(),
+        updatedBy: args.updatedBy,
+      },
+    })
+}
+
+// ----------------------------------------------------------------------------
+// Admin quota strip — row counts per table for the free-tier health panel.
+// ----------------------------------------------------------------------------
+// D1 free tier is 5 GB; the row counts are a proxy for "how full are we"
+// without having to call the Cloudflare API. R2 object stats are produced
+// by the Worker (R2 binding isn't reachable from the db package), so this
+// helper covers D1 only.
+
+export interface DbCounts {
+  readonly users: number
+  readonly matches: number
+  readonly matchPlayers: number
+  readonly mmrHistory: number
+  readonly activeMatches: number
+  readonly sessions: number
+  readonly auditEntries: number
+}
+
+export async function getDbCounts(db: Db): Promise<DbCounts> {
+  const [u, m, mp, mh, ma, s, aa] = await Promise.all([
+    db.select({ n: sql<number>`count(*)` }).from(user),
+    db.select({ n: sql<number>`count(*)` }).from(matches),
+    db.select({ n: sql<number>`count(*)` }).from(matchPlayers),
+    db.select({ n: sql<number>`count(*)` }).from(mmrHistory),
+    db.select({ n: sql<number>`count(*)` }).from(matchActive),
+    db.select({ n: sql<number>`count(*)` }).from(session),
+    db.select({ n: sql<number>`count(*)` }).from(adminAudit),
+  ])
+  return {
+    users: Number(u[0]?.n ?? 0),
+    matches: Number(m[0]?.n ?? 0),
+    matchPlayers: Number(mp[0]?.n ?? 0),
+    mmrHistory: Number(mh[0]?.n ?? 0),
+    activeMatches: Number(ma[0]?.n ?? 0),
+    sessions: Number(s[0]?.n ?? 0),
+    auditEntries: Number(aa[0]?.n ?? 0),
+  }
 }
 
 // ----------------------------------------------------------------------------

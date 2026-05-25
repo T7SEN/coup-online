@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Cinzel, EB_Garamond } from "next/font/google";
 import Script from "next/script";
 import { Footer } from "@/components/footer";
+import { MaintenanceBanner } from "@/components/maintenance-banner";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SITE } from "@/lib/site-metadata";
@@ -117,7 +118,11 @@ const cfAnalyticsToken = process.env.NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN;
 
 // SessionProvider is gone — Better Auth's React client (lib/auth-client.ts)
 // manages its own internal state and does not require a provider.
-export default function RootLayout({
+//
+// async function — the MaintenanceBanner inside is an async server component
+// that fetches /api/site/status from the Worker. The fetch is cached for 60s
+// (matching the Worker's Cache-Control) so per-page-nav cost is amortised.
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -131,9 +136,12 @@ export default function RootLayout({
         {/* The app is a min-h-svh flex column — page content grows, the global
             Footer pins to the bottom. The Navbar is added by (site)/layout.tsx
             for site pages only; the game room stays chrome-free. TooltipProvider
-            gives Radix tooltip context app-wide; Toaster hosts sonner errors. */}
+            gives Radix tooltip context app-wide; Toaster hosts sonner errors.
+            The MaintenanceBanner renders above the content when the admin has
+            flipped the global maintenance flag — null otherwise. */}
         <TooltipProvider>
           <div data-app-shell className="flex min-h-svh flex-col">
+            <MaintenanceBanner />
             <div className="flex flex-1 flex-col">{children}</div>
             <Footer />
           </div>

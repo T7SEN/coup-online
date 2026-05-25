@@ -158,6 +158,9 @@ const nextConfig: NextConfig = {
         source: '/api/admin/:path*',
         destination: `${target}/api/admin/:path*`,
       },
+      // Public site status — drives the maintenance banner in the layout.
+      // No PII, short-cached on the Worker side (60s).
+      { source: '/api/site/status', destination: `${target}/api/site/status` },
       // Patron banner image serving. Public — banners are part of the
       // public profile (the upload endpoint at /api/me/banner is already
       // covered by /api/me/* above).
